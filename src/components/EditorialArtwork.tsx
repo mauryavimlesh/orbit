@@ -12,11 +12,13 @@ export const EditorialArtwork: React.FC<EditorialArtworkProps> = ({
   className = '',
   variant = 'card',
 }) => {
+  const positionClass = /\b(absolute|fixed|sticky)\b/.test(className) ? '' : 'relative';
+
   switch (theme) {
     case 'quantum_twilight':
       return (
         <div
-          className={`relative overflow-hidden select-none bg-[#1B1326] ${className}`}
+          className={`${positionClass} overflow-hidden select-none bg-[#1B1326] ${className}`}
           aria-hidden="true"
         >
           <svg
@@ -118,7 +120,7 @@ export const EditorialArtwork: React.FC<EditorialArtworkProps> = ({
     case 'geospatial_splatting':
       return (
         <div
-          className={`relative overflow-hidden select-none bg-[#1B2234] ${className}`}
+          className={`${positionClass} overflow-hidden select-none bg-[#1B2234] ${className}`}
           aria-hidden="true"
         >
           <svg
@@ -171,7 +173,7 @@ export const EditorialArtwork: React.FC<EditorialArtworkProps> = ({
     case 'biotech_bohr':
       return (
         <div
-          className={`relative overflow-hidden select-none bg-[#162332] ${className}`}
+          className={`${positionClass} overflow-hidden select-none bg-[#162332] ${className}`}
           aria-hidden="true"
         >
           <svg
@@ -225,7 +227,7 @@ export const EditorialArtwork: React.FC<EditorialArtworkProps> = ({
     case 'sparse_attention':
       return (
         <div
-          className={`relative overflow-hidden select-none bg-[#23192D] ${className}`}
+          className={`${positionClass} overflow-hidden select-none bg-[#23192D] ${className}`}
           aria-hidden="true"
         >
           <svg
@@ -275,7 +277,7 @@ export const EditorialArtwork: React.FC<EditorialArtworkProps> = ({
     default:
       return (
         <div
-          className={`relative overflow-hidden select-none bg-[#1B263B] ${className}`}
+          className={`${positionClass} overflow-hidden select-none bg-[#1B263B] ${className}`}
           aria-hidden="true"
         >
           <svg

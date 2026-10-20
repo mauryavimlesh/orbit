@@ -29,6 +29,7 @@ import {
   Clock,
   BellPlus,
   Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 interface HomepageGitHubSectionProps {
@@ -88,9 +89,13 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
 
   const [repos, setRepos] = useState<GitHubCatalogRepoItem[]>(SEED_GITHUB_REPOS);
   const [isLoadingRepos, setIsLoadingRepos] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [page, setPage] = useState<number>(1);
+  const [hasMore, setHasMore] = useState<boolean>(true);
   const [repoSearchError, setRepoSearchError] = useState<string | null>(null);
   const [isRateLimited, setIsRateLimited] = useState<boolean>(false);
   const [lastFetchedLabel, setLastFetchedLabel] = useState<string | null>(null);
+  const [showFiltersPopover, setShowFiltersPopover] = useState<boolean>(false);
 
   // Repository Detail Modal State
   const [inspectModalOpen, setInspectModalOpen] = useState<boolean>(false);
@@ -106,30 +111,41 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
     topicId?: string;
     language?: string;
     sort?: 'stars' | 'updated';
+    pageNumber?: number;
+    append?: boolean;
   }) => {
     const activeQ = opts.q !== undefined ? opts.q : repoSearchInput;
     const activeTopic = opts.topicId !== undefined ? opts.topicId : selectedTopicId;
     const activeLang = opts.language !== undefined ? opts.language : languageFilter;
     const activeSort = opts.sort !== undefined ? opts.sort : sortBy;
+    const pageNum = opts.pageNumber !== undefined ? opts.pageNumber : 1;
+    const isAppend = opts.append === true;
 
-    // If default 'all' with no query and 'All' language, show verified seed repos + any cached
     const presetObj = GITHUB_TOPIC_PRESETS.find((t) => t.id === activeTopic);
-    const effectiveQuery = activeQ.trim() || presetObj?.query || '';
+    const effectiveQuery =
+      activeQ.trim() ||
+      presetObj?.query ||
+      (pageNum > 1 ? 'machine-learning OR deep-learning OR scientific-computing' : '');
 
-    if (!effectiveQuery && activeLang === 'All' && activeTopic === 'all') {
+    if (!effectiveQuery && activeLang === 'All' && activeTopic === 'all' && pageNum === 1) {
       const sortedSeeds = [...SEED_GITHUB_REPOS].sort((a, b) =>
         activeSort === 'updated'
           ? b.updatedAt.localeCompare(a.updatedAt)
           : b.stars - a.stars
       );
       setRepos(sortedSeeds);
+      setHasMore(true);
       setRepoSearchError(null);
       setIsRateLimited(false);
       setLastFetchedLabel(null);
       return;
     }
 
-    setIsLoadingRepos(true);
+    if (isAppend) {
+      setIsLoadingMore(true);
+    } else {
+      setIsLoadingRepos(true);
+    }
     setRepoSearchError(null);
     setIsRateLimited(false);
 
@@ -138,6 +154,8 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
       if (effectiveQuery) params.set('q', effectiveQuery);
       if (activeLang !== 'All') params.set('language', activeLang);
       params.set('sort', activeSort);
+      params.set('page', String(pageNum));
+      params.set('per_page', '9');
 
       const res = await fetch(`/api/github/discover?${params.toString()}`);
       const data = await res.json();
@@ -155,7 +173,10 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
             r.topics.some((t) => t.toLowerCase().includes(qLower));
           return matchesLang && matchesQ;
         });
-        setRepos(localFiltered.length > 0 ? localFiltered : SEED_GITHUB_REPOS);
+        if (!isAppend) {
+          setRepos(localFiltered.length > 0 ? localFiltered : SEED_GITHUB_REPOS);
+        }
+        setHasMore(false);
         return;
       }
 
@@ -164,22 +185,30 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
         return;
       }
 
-      if (Array.isArray(data.items) && data.items.length > 0) {
-        setRepos(data.items);
-        setLastFetchedLabel(
-          `Retrieved ${data.items.length} repositories from GitHub REST API`
-        );
+      const incoming: GitHubCatalogRepoItem[] = Array.isArray(data.items) ? data.items : [];
+      if (isAppend) {
+        setRepos((prev) => {
+          const seen = new Set(prev.map((r) => r.fullName.toLowerCase()));
+          const uniqueIncoming = incoming.filter((r) => !seen.has(r.fullName.toLowerCase()));
+          return [...prev, ...uniqueIncoming];
+        });
       } else {
-        setRepos([]);
-        setLastFetchedLabel('No matching repositories found on GitHub for this filter.');
+        setRepos(incoming);
       }
+      setHasMore(Boolean(data.hasMore) && incoming.length > 0);
+      setLastFetchedLabel(
+        incoming.length > 0
+          ? `Retrieved ${data.totalCount?.toLocaleString() || incoming.length} repositories from GitHub REST API`
+          : 'No matching repositories found on GitHub for this filter.'
+      );
     } catch {
       setRepoSearchError(
         'GitHub search API is temporarily unreachable. Showing verified benchmark repositories.'
       );
-      setRepos(SEED_GITHUB_REPOS);
+      if (!isAppend) setRepos(SEED_GITHUB_REPOS);
     } finally {
       setIsLoadingRepos(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -321,80 +350,58 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
     onToggleBookmark(disc.id);
   };
 
+  const activeFilterCount =
+    (selectedTopicId !== 'all' ? 1 : 0) +
+    (languageFilter !== 'All' ? 1 : 0) +
+    (sortBy !== 'stars' ? 1 : 0);
+
+  const resetAllHomepageRepoFilters = () => {
+    setSelectedTopicId('all');
+    setLanguageFilter('All');
+    setSortBy('stars');
+    setRepoSearchInput('');
+    setLinkedPaperContext(null);
+    setPage(1);
+    runLiveRepoDiscovery({ q: '', topicId: 'all', language: 'All', sort: 'stars', pageNumber: 1, append: false });
+  };
+
   return (
-    <section id="homepage-github-section" className="space-y-5 pt-4">
-      <div className="orbit-glass-panel rounded-[28px] p-6 sm:p-7 space-y-5 border border-white/12">
-        {/* Section Header */}
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1.5 max-w-2xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-500/30 text-xs font-mono text-sky-300">
-              <GitBranch className="w-3.5 h-3.5" />
+    <section id="homepage-github-section" className="space-y-4 pt-2">
+      <div className="orbit-glass-panel rounded-[26px] p-5 sm:p-6 space-y-4 border border-white/12 relative">
+        {/* Compact Section Header */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1 max-w-2xl">
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-[11px] font-mono text-sky-300">
+              <GitBranch className="w-3 h-3" />
               <span>GitHub Repositories · Open-Source Research &amp; Code</span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
               Discover Open-Source Research Implementations &amp; Repositories
             </h2>
-            <p className="text-xs sm:text-sm text-white/65 leading-relaxed">
-              Explore real GitHub repositories linked to research topics, inspect README documentation and language metadata, ask Professor to explain the architecture, or generate structured setup notes.
-            </p>
           </div>
 
-          {/* Sort & Reset Controls */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center rounded-full bg-black/45 border border-white/12 p-1 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setSortBy('stars');
-                  runLiveRepoDiscovery({ sort: 'stars' });
-                }}
-                className={`px-3 py-1 rounded-full transition-colors ${
-                  sortBy === 'stars'
-                    ? 'bg-white text-[#0B0A0E] font-semibold'
-                    : 'text-white/65 hover:text-white'
-                }`}
-              >
-                Most Stars
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSortBy('updated');
-                  runLiveRepoDiscovery({ sort: 'updated' });
-                }}
-                className={`px-3 py-1 rounded-full transition-colors ${
-                  sortBy === 'updated'
-                    ? 'bg-white text-[#0B0A0E] font-semibold'
-                    : 'text-white/65 hover:text-white'
-                }`}
-              >
-                Recently Updated
-              </button>
-            </div>
-
-            {onExploreAllRepositories && (
-              <button
-                type="button"
-                onClick={onExploreAllRepositories}
-                className="px-4 py-2 rounded-full bg-white text-[#0B0A0E] hover:bg-white/90 text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-md shrink-0 cursor-pointer"
-              >
-                <span>Explore All Repositories</span>
-                <span>&rarr;</span>
-              </button>
-            )}
-          </div>
+          {onExploreAllRepositories && (
+            <button
+              type="button"
+              onClick={onExploreAllRepositories}
+              className="px-4 py-2 rounded-full bg-white text-[#0B0A0E] hover:bg-white/90 text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-sm shrink-0 cursor-pointer"
+            >
+              <span>Full Repository Explorer</span>
+              <span>&rarr;</span>
+            </button>
+          )}
         </div>
 
         {/* Linked Paper Relationship Banner (Journey B: Research to GitHub) */}
         {linkedPaperContext && (
-          <div className="p-3.5 rounded-2xl bg-sky-500/10 border border-sky-500/25 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2.5 min-w-0">
+          <div className="p-3 rounded-2xl bg-sky-500/10 border border-sky-500/25 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
               <Sparkles className="w-4 h-4 text-sky-300 shrink-0" />
               <div className="min-w-0">
                 <span className="font-semibold text-white">
                   {linkedPaperContext.isVerifiedCompanion
                     ? 'Verified Companion Repository Match: '
-                    : 'Suggested Topic Repositories (Inferred from Paper Topic): '}
+                    : 'Suggested Topic Repositories: '}
                 </span>
                 <span className="text-white/75 truncate">
                   {linkedPaperContext.paperTitle}
@@ -403,122 +410,290 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
             </div>
             <button
               type="button"
-              onClick={() => {
-                setLinkedPaperContext(null);
-                setRepoSearchInput('');
-                setSelectedTopicId('all');
-                runLiveRepoDiscovery({ q: '', topicId: 'all' });
-              }}
-              className="px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/85 shrink-0"
+              onClick={resetAllHomepageRepoFilters}
+              className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/85 shrink-0"
             >
               Show All Featured Repos
             </button>
           </div>
         )}
 
-        {/* Search & Direct owner/repo Inspector Bar */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            const trimmed = repoSearchInput.trim();
-            if (trimmed.includes('/') && !trimmed.includes(' ')) {
-              handleOpenRepoDetail(trimmed);
-            } else {
-              setLinkedPaperContext(null);
-              runLiveRepoDiscovery({ q: trimmed });
-            }
-          }}
-          className="flex flex-col sm:flex-row gap-3"
-        >
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-white/45 absolute left-4 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={repoSearchInput}
-              onChange={(e) => setRepoSearchInput(e.target.value)}
-              placeholder="Search GitHub topics/projects (e.g., 'gaussian splatting', 'flash attention') or enter owner/repo..."
-              className="w-full pl-11 pr-9 py-3 rounded-2xl bg-black/45 border border-white/15 text-xs sm:text-sm text-white placeholder:text-white/45 focus:outline-none focus:border-white/40"
-            />
-            {repoSearchInput && (
-              <button
-                type="button"
-                onClick={() => {
-                  setRepoSearchInput('');
-                  setLinkedPaperContext(null);
-                  runLiveRepoDiscovery({ q: '' });
-                }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/45 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          <button
-            type="submit"
-            disabled={isLoadingRepos}
-            className="px-5 py-3 rounded-2xl bg-white text-[#0B0A0E] text-xs sm:text-sm font-bold hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-sm"
+        {/* Compact Search + Filters & Sort Trigger Row */}
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const trimmed = repoSearchInput.trim();
+              if (trimmed.includes('/') && !trimmed.includes(' ')) {
+                handleOpenRepoDetail(trimmed);
+              } else {
+                setLinkedPaperContext(null);
+                setPage(1);
+                runLiveRepoDiscovery({ q: trimmed, pageNumber: 1, append: false });
+              }
+            }}
+            className="flex-1 flex gap-2"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRepos ? 'animate-spin' : ''}`} />
-            <span>
-              {isLoadingRepos
-                ? 'Searching GitHub...'
-                : repoSearchInput.trim().includes('/') && !repoSearchInput.trim().includes(' ')
-                ? 'Inspect owner/repo'
-                : 'Explore Repositories'}
-            </span>
-          </button>
-        </form>
-
-        {/* Topic Discovery Bar + Language Filter */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
-            {GITHUB_TOPIC_PRESETS.map((topic) => {
-              const active = selectedTopicId === topic.id && !linkedPaperContext;
-              return (
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-white/45 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={repoSearchInput}
+                onChange={(e) => setRepoSearchInput(e.target.value)}
+                placeholder="Search GitHub topics/projects (e.g., 'gaussian splatting', 'flash attention') or enter owner/repo..."
+                className="w-full pl-10 pr-8 py-2.5 rounded-2xl bg-black/45 border border-white/15 text-xs sm:text-sm text-white placeholder:text-white/45 focus:outline-none focus:border-white/40"
+              />
+              {repoSearchInput && (
                 <button
-                  key={topic.id}
                   type="button"
                   onClick={() => {
-                    setSelectedTopicId(topic.id);
+                    setRepoSearchInput('');
                     setLinkedPaperContext(null);
-                    setRepoSearchInput(topic.query);
-                    runLiveRepoDiscovery({
-                      q: topic.query,
-                      topicId: topic.id,
-                    });
+                    setPage(1);
+                    runLiveRepoDiscovery({ q: '', pageNumber: 1, append: false });
                   }}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'bg-sky-400 text-[#0B0A0E] font-bold shadow-sm'
-                      : 'orbit-glass-pill text-white/75 hover:text-white hover:bg-white/15'
-                  }`}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/45 hover:text-white"
                 >
-                  {topic.label}
+                  <X className="w-3.5 h-3.5" />
                 </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[11px] font-mono text-white/50">Language:</span>
-            <select
-              value={languageFilter}
-              onChange={(e) => {
-                const nextLang = e.target.value;
-                setLanguageFilter(nextLang);
-                runLiveRepoDiscovery({ language: nextLang });
-              }}
-              aria-label="Filter repositories by programming language"
-              className="px-3 py-1.5 rounded-xl bg-black/50 border border-white/15 text-xs text-white focus:outline-none"
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={isLoadingRepos}
+              className="px-4 py-2.5 rounded-2xl bg-white text-[#0B0A0E] text-xs font-bold hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm"
             >
-              {LANGUAGE_FILTERS.map((lang) => (
-                <option key={lang} value={lang}>
-                  {lang === 'All' ? 'All Languages' : lang}
-                </option>
-              ))}
-            </select>
-          </div>
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRepos ? 'animate-spin' : ''}`} />
+              <span>
+                {isLoadingRepos
+                  ? 'Searching...'
+                  : repoSearchInput.trim().includes('/') && !repoSearchInput.trim().includes(' ')
+                  ? 'Inspect'
+                  : 'Search'}
+              </span>
+            </button>
+          </form>
+
+          <button
+            type="button"
+            onClick={() => setShowFiltersPopover((prev) => !prev)}
+            className={`px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all inline-flex items-center justify-center gap-2 border shrink-0 ${
+              showFiltersPopover || activeFilterCount > 0
+                ? 'bg-white text-[#0B0A0E] border-white shadow-sm'
+                : 'orbit-glass-pill text-white border-white/15 hover:bg-white/15'
+            }`}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span>Filters &amp; Sort</span>
+            {activeFilterCount > 0 && (
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                  showFiltersPopover || activeFilterCount > 0
+                    ? 'bg-[#0B0A0E] text-sky-300'
+                    : 'bg-sky-500/20 text-sky-200'
+                }`}
+              >
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
         </div>
+
+        {/* Removable Active Filter Chips (only displayed when filters are active) */}
+        {(activeFilterCount > 0 || Boolean(repoSearchInput.trim())) && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-mono text-white/45 mr-1">Active:</span>
+            {selectedTopicId !== 'all' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-500/15 border border-sky-500/30 text-[11px] text-sky-200">
+                <span>
+                  Topic: {GITHUB_TOPIC_PRESETS.find((t) => t.id === selectedTopicId)?.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTopicId('all');
+                    setRepoSearchInput('');
+                    setPage(1);
+                    runLiveRepoDiscovery({ q: '', topicId: 'all', pageNumber: 1, append: false });
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {languageFilter !== 'All' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[11px] text-emerald-200">
+                <span>Language: {languageFilter}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLanguageFilter('All');
+                    setPage(1);
+                    runLiveRepoDiscovery({ language: 'All', pageNumber: 1, append: false });
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {sortBy !== 'stars' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] text-white/85">
+                <span>Sort: Recently Updated</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortBy('stars');
+                    setPage(1);
+                    runLiveRepoDiscovery({ sort: 'stars', pageNumber: 1, append: false });
+                  }}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={resetAllHomepageRepoFilters}
+              className="px-2.5 py-1 rounded-full text-[11px] font-mono text-rose-300 hover:bg-rose-500/15 transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
+        {/* COMPACT FILTERS & SORT POPOVER / MOBILE BOTTOM SHEET */}
+        {showFiltersPopover && (
+          <div className="fixed inset-x-0 bottom-0 z-50 sm:static sm:inset-auto sm:z-30 bg-[#12101B] sm:bg-black/75 border-t sm:border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl backdrop-blur-xl max-h-[82vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4 text-sky-300" />
+                <span className="text-xs sm:text-sm font-bold text-white">
+                  Repository Filters &amp; Sort
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {activeFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={resetAllHomepageRepoFilters}
+                    className="px-2.5 py-1 rounded-full text-[11px] text-rose-300 hover:bg-rose-500/15"
+                  >
+                    Reset all
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowFiltersPopover(false)}
+                  className="px-3 py-1 rounded-full bg-sky-400 text-[#0B0A0E] text-xs font-bold hover:bg-sky-300"
+                >
+                  Apply &amp; Done
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Group 1: Topic Preset */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-white/55 block">
+                  Research Code Topic
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {GITHUB_TOPIC_PRESETS.map((topic) => (
+                    <button
+                      key={topic.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTopicId(topic.id);
+                        setLinkedPaperContext(null);
+                        setRepoSearchInput(topic.query);
+                        setPage(1);
+                        runLiveRepoDiscovery({
+                          q: topic.query,
+                          topicId: topic.id,
+                          pageNumber: 1,
+                          append: false,
+                        });
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        selectedTopicId === topic.id && !linkedPaperContext
+                          ? 'bg-sky-400 text-[#0B0A0E] font-bold'
+                          : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                      }`}
+                    >
+                      {topic.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Group 2: Programming Language */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-white/55 block">
+                  Programming Language
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {LANGUAGE_FILTERS.map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => {
+                        setLanguageFilter(lang);
+                        setPage(1);
+                        runLiveRepoDiscovery({ language: lang, pageNumber: 1, append: false });
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        languageFilter === lang
+                          ? 'bg-emerald-400 text-[#0B0A0E] font-bold'
+                          : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                      }`}
+                    >
+                      {lang}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Group 3: Sort Order */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-white/55 block">
+                  Sort Repositories By
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSortBy('stars');
+                      setPage(1);
+                      runLiveRepoDiscovery({ sort: 'stars', pageNumber: 1, append: false });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      sortBy === 'stars'
+                        ? 'bg-white text-[#0B0A0E] font-bold'
+                        : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                    }`}
+                  >
+                    Most Stars
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSortBy('updated');
+                      setPage(1);
+                      runLiveRepoDiscovery({ sort: 'updated', pageNumber: 1, append: false });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      sortBy === 'updated'
+                        ? 'bg-white text-[#0B0A0E] font-bold'
+                        : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                    }`}
+                  >
+                    Recently Updated
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Status / Rate-Limit / Error Notices */}
         {isRateLimited && (
@@ -593,124 +768,148 @@ export const HomepageGitHubSection: React.FC<HomepageGitHubSectionProps> = ({
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {repos.map((repo) => {
-              const discId = getRepoDiscoveryId(repo.fullName);
-              const isSaved = bookmarkedIds.includes(discId);
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {repos.map((repo) => {
+                const discId = getRepoDiscoveryId(repo.fullName);
+                const isSaved = bookmarkedIds.includes(discId);
 
-              return (
-                <article
-                  key={repo.fullName}
-                  onClick={() => handleOpenRepoDetail(repo)}
-                  className="group rounded-[22px] p-5 bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 hover:border-white/25 transition-all flex flex-col justify-between gap-4 cursor-pointer"
-                >
-                  <div className="space-y-3">
-                    {/* Top Row: Owner/Name + Language Badge */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <span className="text-[11px] font-mono text-white/50 block truncate">
-                          {repo.owner}
-                        </span>
-                        <h3 className="text-base font-bold font-mono text-white group-hover:text-sky-300 transition-colors truncate">
-                          {repo.name}
-                        </h3>
-                      </div>
-                      <span className="px-2.5 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-[11px] font-mono text-sky-300 shrink-0">
-                        {repo.language}
-                      </span>
-                    </div>
-
-                    {/* Description */}
-                    <p className="text-xs sm:text-sm text-white/75 leading-relaxed line-clamp-3">
-                      {repo.description}
-                    </p>
-
-                    {/* Topics */}
-                    {repo.topics && repo.topics.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {repo.topics.slice(0, 4).map((t) => (
-                          <span
-                            key={t}
-                            className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/10 text-[10px] font-mono text-white/65"
-                          >
-                            #{t}
+                return (
+                  <article
+                    key={repo.fullName}
+                    onClick={() => handleOpenRepoDetail(repo)}
+                    className="group rounded-[22px] p-5 bg-white/[0.03] hover:bg-white/[0.05] border border-white/10 hover:border-white/25 transition-all flex flex-col justify-between gap-4 cursor-pointer"
+                  >
+                    <div className="space-y-3">
+                      {/* Top Row: Owner/Name + Language Badge */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="text-[11px] font-mono text-white/50 block truncate">
+                            {repo.owner}
                           </span>
-                        ))}
+                          <h3 className="text-base font-bold font-mono text-white group-hover:text-sky-300 transition-colors truncate">
+                            {repo.name}
+                          </h3>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/30 text-[11px] font-mono text-sky-300 shrink-0">
+                          {repo.language}
+                        </span>
                       </div>
-                    )}
-                  </div>
 
-                  <div className="space-y-3 pt-2 border-t border-white/10">
-                    {/* Telemetry Strip: Stars, Forks, License, Updated */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-white/60">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex items-center gap-1 text-amber-300">
-                          <Star className="w-3.5 h-3.5 fill-amber-300/30" />
-                          {repo.stars.toLocaleString()}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <GitFork className="w-3 h-3" />
-                          {repo.forks.toLocaleString()}
-                        </span>
-                        <span className="truncate max-w-[110px]" title={repo.license}>
-                          {repo.license}
-                        </span>
-                      </div>
-                      <span className="text-white/45">{repo.updatedAt}</span>
+                      {/* Description */}
+                      <p className="text-xs sm:text-sm text-white/75 leading-relaxed line-clamp-3">
+                        {repo.description}
+                      </p>
+
+                      {/* Topics */}
+                      {repo.topics && repo.topics.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {repo.topics.slice(0, 4).map((t) => (
+                            <span
+                              key={t}
+                              className="px-2 py-0.5 rounded-md bg-white/[0.05] border border-white/10 text-[10px] font-mono text-white/65"
+                            >
+                              #{t}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Card Actions */}
-                    <div
-                      className="flex items-center justify-between gap-2"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => handleOpenRepoDetail(repo)}
-                        className="px-3.5 py-1.5 rounded-xl bg-white text-[#0B0A0E] text-xs font-bold hover:bg-white/90 transition-colors inline-flex items-center gap-1.5"
-                      >
-                        <Code2 className="w-3.5 h-3.5" />
-                        <span>Inspect Project</span>
-                      </button>
+                    <div className="space-y-3 pt-2 border-t border-white/10">
+                      {/* Telemetry Strip: Stars, Forks, License, Updated */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-white/60">
+                        <div className="flex items-center gap-3">
+                          <span className="inline-flex items-center gap-1 text-amber-300">
+                            <Star className="w-3.5 h-3.5 fill-amber-300/30" />
+                            {repo.stars.toLocaleString()}
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <GitFork className="w-3 h-3" />
+                            {repo.forks.toLocaleString()}
+                          </span>
+                          <span className="truncate max-w-[110px]" title={repo.license}>
+                            {repo.license}
+                          </span>
+                        </div>
+                        <span className="text-white/45">{repo.updatedAt}</span>
+                      </div>
 
-                      <div className="flex items-center gap-1.5">
+                      {/* Card Actions */}
+                      <div
+                        className="flex items-center justify-between gap-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           type="button"
-                          onClick={() => handleSaveCatalogRepoToLibrary(repo)}
-                          className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors inline-flex items-center gap-1 ${
-                            isSaved
-                              ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/35'
-                              : 'bg-white/[0.06] hover:bg-white/15 text-white/80 border border-white/10'
-                          }`}
+                          onClick={() => handleOpenRepoDetail(repo)}
+                          className="px-3.5 py-1.5 rounded-xl bg-white text-[#0B0A0E] text-xs font-bold hover:bg-white/90 transition-colors inline-flex items-center gap-1.5"
                         >
-                          {isSaved ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-300" />
-                              <span>Saved</span>
-                            </>
-                          ) : (
-                            <>
-                              <Bookmark className="w-3 h-3" />
-                              <span>Save</span>
-                            </>
-                          )}
+                          <Code2 className="w-3.5 h-3.5" />
+                          <span>Inspect Project</span>
                         </button>
 
-                        <a
-                          href={repo.htmlUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          aria-label={`Open ${repo.fullName} on GitHub`}
-                          className="p-1.5 rounded-xl bg-white/[0.06] hover:bg-white/15 text-white/75 hover:text-white border border-white/10"
-                        >
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveCatalogRepoToLibrary(repo)}
+                            className={`px-2.5 py-1.5 rounded-xl text-xs font-medium transition-colors inline-flex items-center gap-1 ${
+                              isSaved
+                                ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/35'
+                                : 'bg-white/[0.06] hover:bg-white/15 text-white/80 border border-white/10'
+                            }`}
+                          >
+                            {isSaved ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-300" />
+                                <span>Saved</span>
+                              </>
+                            ) : (
+                              <>
+                                <Bookmark className="w-3 h-3" />
+                                <span>Save</span>
+                              </>
+                            )}
+                          </button>
+
+                          <a
+                            href={repo.htmlUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={`Open ${repo.fullName} on GitHub`}
+                            className="p-1.5 rounded-xl bg-white/[0.06] hover:bg-white/15 text-white/75 hover:text-white border border-white/10"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </article>
-              );
-            })}
+                  </article>
+                );
+              })}
+            </div>
+
+            {hasMore && (
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  disabled={isLoadingMore}
+                  onClick={() => {
+                    const nextPage = page + 1;
+                    setPage(nextPage);
+                    runLiveRepoDiscovery({ pageNumber: nextPage, append: true });
+                  }}
+                  className="px-5 py-2.5 rounded-full orbit-glass-pill text-xs font-semibold text-white hover:bg-white/20 transition-colors inline-flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMore ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isLoadingMore
+                      ? `Loading Page ${page + 1} from GitHub...`
+                      : `Load More Repositories (Page ${page + 1})`}
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

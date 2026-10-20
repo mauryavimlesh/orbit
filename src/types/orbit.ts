@@ -52,6 +52,30 @@ export interface AssociatedCodeRepo {
   description?: string;
   language?: string;
   provenance: 'Papers with Code / HF Verified' | 'Verified Companion' | 'Topic Recommendation';
+  matchConfidence?: 'high_verified' | 'medium_inferred' | 'topic_related';
+  evidenceNote?: string;
+}
+
+export interface PaperStructuredSection {
+  id: string;
+  heading: string;
+  content: string;
+  sourceBasis: 'full_text' | 'abstract_synthesis' | 'metadata';
+}
+
+export interface PaperFigureItem {
+  id: string;
+  label: string;
+  caption: string;
+  imageUrl?: string;
+  sourceNote?: string;
+}
+
+export interface PaperTableItem {
+  id: string;
+  caption: string;
+  headers: string[];
+  rows: string[][];
 }
 
 export interface CitationNetworkNode {
@@ -236,7 +260,7 @@ export interface DiscoveryItem {
   fullTextUrl?: string;
   highStakesMedicalNotice?: boolean;
   relatedRepoQuery?: string;
-  // Multi-provider provenance & bibliographic identifiers
+  // Multi-provider provenance & canonical bibliographic identifiers
   primaryProvider?: ResearchProviderId;
   contributingSources?: string[];
   providerLinks?: ProviderRecordLink[];
@@ -244,10 +268,33 @@ export interface DiscoveryItem {
   pmid?: string;
   pmcid?: string;
   arxivId?: string;
+  openalexId?: string;
+  semanticScholarId?: string;
   citationCount?: number;
   referenceCount?: number;
   venue?: string;
+  publisher?: string;
   publicationYear?: number;
+  pdfUrl?: string;
+  isOpenAccess?: boolean;
+  accessStatus?:
+    | 'open_access_full_text'
+    | 'open_access_pdf'
+    | 'abstract_and_metadata'
+    | 'metadata_only';
+  retrievalStatus?:
+    | 'full_text_retrieved'
+    | 'abstract_and_metadata_retrieved'
+    | 'metadata_only_retrieved';
+  hasRealAbstract?: boolean;
+  abstractText?: string;
+  tldrSummary?: string;
+  keywords?: string[];
+  subjectCategories?: string[];
+  authorAffiliations?: string[];
+  structuredSections?: PaperStructuredSection[];
+  figures?: PaperFigureItem[];
+  tables?: PaperTableItem[];
   associatedRepos?: AssociatedCodeRepo[];
 }
 

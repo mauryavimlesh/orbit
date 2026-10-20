@@ -8,6 +8,7 @@ import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
 import {
   ALL_PROVIDER_IDS,
   executeUnifiedMultiSourceSearch,
+  fetchAndEnrichPaperRecord,
   fetchCitationNetworkAndRelated,
 } from './src/server/researchProviders';
 import { ResearchProviderId } from './src/types/orbit';
@@ -495,6 +496,60 @@ async function startServer() {
       });
     }
   });
+
+  // 2A-1C. Universal Paper Record Resolver & Deep Full-Text/Abstract Enrichment (/api/research/paper-detail)
+  const handlePaperDetailRequest = async (req: express.Request, res: express.Response) => {
+    const body = req.method === 'POST' ? req.body || {} : {};
+    const paperId = String(body.paperId || req.query.paperId || req.query.id || '').trim();
+    const canonicalId = String(body.canonicalId || req.query.canonicalId || '').trim();
+    const doi = String(body.doi || req.query.doi || '').trim() || undefined;
+    const arxivId = String(body.arxivId || req.query.arxivId || '').trim() || undefined;
+    const pmid = String(body.pmid || req.query.pmid || '').trim() || undefined;
+    const pmcid = String(body.pmcid || req.query.pmcid || '').trim() || undefined;
+    const title = String(body.title || req.query.title || '').trim() || undefined;
+    const existingItem = body.existingItem || undefined;
+
+    if (!paperId && !canonicalId && !doi && !arxivId && !pmid && !title && !existingItem) {
+      res.status(400).json({ error: 'Provide paperId, canonicalId, doi, arxivId, pmid, or title to resolve.' });
+      return;
+    }
+
+    const cacheKey = `paper_detail_v2:${(canonicalId || doi || arxivId || pmid || paperId || title || '').toLowerCase().slice(0, 120)}`;
+    const cached = getCachedResponse<any>(cacheKey);
+    if (cached && cached.data?.item) {
+      res.json({ ...cached.data, retrievedAt: cached.fetchedAt, cached: true });
+      return;
+    }
+
+    try {
+      const result = await fetchAndEnrichPaperRecord({
+        paperId,
+        canonicalId,
+        doi,
+        arxivId,
+        pmid,
+        pmcid,
+        title,
+        existingItem,
+      });
+      if (!result.item) {
+        res.status(404).json({
+          error: `No scholarly record could be verified for identifier "${paperId || canonicalId || doi || title}".`,
+          sourcesChecked: result.sourcesChecked,
+          retrievedAt: result.retrievedAt,
+        });
+        return;
+      }
+      setCachedResponse(cacheKey, result, 1000 * 60 * 30);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({
+        error: err.message || 'Failed to resolve and enrich paper record.',
+      });
+    }
+  };
+  app.get('/api/research/paper-detail', handlePaperDetailRequest);
+  app.post('/api/research/paper-detail', handlePaperDetailRequest);
 
   // 2A-2. Configured Research Providers Metadata & Key Status (/api/discover/providers)
   app.get('/api/discover/providers', (_req, res) => {

@@ -9,6 +9,9 @@ import {
   DomainCategory,
   EquationSpec,
   EvidenceStatus,
+  PaperFigureItem,
+  PaperStructuredSection,
+  PaperTableItem,
   ProviderRecordLink,
   ProviderStatusReport,
   ResearchProviderId,
@@ -242,123 +245,164 @@ function selectArtworkAndSandbox(domain: DomainCategory): {
   }
 }
 
-// Extract real LaTeX formulas from abstract/text or provide domain-grounded canonical equation
+// Extract ONLY genuine LaTeX formulas present in the paper's actual text/abstract (never fabricate unrelated equations)
 export function extractEquationsFromText(
   title: string,
   abstractText: string,
-  domain: DomainCategory
+  _domain?: DomainCategory
 ): EquationSpec[] {
   const equations: EquationSpec[] = [];
-  const combined = `${title} ${abstractText}`;
+  if (!abstractText) return equations;
 
-  // 1. Check if the paper abstract contains explicit inline or display LaTeX ($...$ or $$...$$)
-  const latexMatches = Array.from(
-    abstractText.matchAll(/\$\$([^$]{4,140})\$\$|\$([^$]{4,95})\$/g)
-  );
-  for (let i = 0; i < Math.min(2, latexMatches.length); i++) {
-    const rawLatex = (latexMatches[i][1] || latexMatches[i][2] || '').trim();
-    if (rawLatex && /[=<>\\^_{}+-]/.test(rawLatex)) {
-      equations.push({
-        id: `eq-extracted-${i}`,
-        title: `Mathematical Expression from Manuscript (${i + 1})`,
-        formula: rawLatex,
-        variables: [
-          {
-            symbol: 'Expression',
-            meaning: 'Extracted directly from author abstract LaTeX notation',
-            unit: 'manuscript notation',
-          },
-        ],
-        intuition: `Formal mathematical relationship stated in the abstract of "${title.slice(0, 70)}".`,
-      });
+  const latexPatterns = [
+    /\$\$([^$]{4,220})\$\$/g,
+    /\\\[([\s\S]{4,220}?)\\\]/g,
+    /\\begin\{equation\*?\}([\s\S]{4,240}?)\\end\{equation\*?\}/g,
+    /\$([^$\n]{4,110})\$/g,
+  ];
+
+  const seenFormulas = new Set<string>();
+  for (const regex of latexPatterns) {
+    const matches = Array.from(abstractText.matchAll(regex));
+    for (const m of matches) {
+      const rawLatex = (m[1] || '').trim();
+      if (
+        rawLatex &&
+        /[=<>\\^_{}+-]/.test(rawLatex) &&
+        !seenFormulas.has(rawLatex) &&
+        equations.length < 4
+      ) {
+        seenFormulas.add(rawLatex);
+        equations.push({
+          id: `eq-extracted-${equations.length + 1}`,
+          title: `Manuscript Mathematical Expression (${equations.length + 1})`,
+          formula: rawLatex,
+          variables: [
+            {
+              symbol: 'Notation',
+              meaning: 'Extracted directly from author manuscript / abstract LaTeX notation',
+              unit: 'manuscript notation',
+            },
+          ],
+          intuition: `Formal mathematical expression stated directly by the authors in "${title.slice(0, 80)}".`,
+        });
+      }
     }
   }
 
-  if (equations.length > 0) return equations;
+  return equations;
+}
 
-  // 2. Domain-specific quantitative reference relationships when relevant keywords appear
-  const lower = combined.toLowerCase();
-  if (/(quantum|surface code|qubit|error correction|stabilizer)/.test(lower)) {
-    equations.push({
-      id: 'eq-qec-scaling',
-      title: 'Topological Surface Code Error Suppression Law',
-      formula: '\\varepsilon_L(d) \\approx C \\left(\\frac{p}{p_{\\text{th}}}\\right)^{\\frac{d+1}{2}} = \\frac{\\varepsilon_0}{\\Lambda^{(d-1)/2}}',
-      variables: [
-        { symbol: '\\varepsilon_L(d)', meaning: 'Logical error rate at code distance d', unit: 'per cycle' },
-        { symbol: 'p, p_{\\text{th}}', meaning: 'Physical gate error rate & threshold (~1%)', unit: 'probability' },
-        { symbol: '\\Lambda', meaning: 'Below-threshold error suppression ratio', unit: 'dimensionless' },
-      ],
-      intuition:
-        'When physical gate error p < p_th, increasing lattice distance d exponentially suppresses logical errors.',
-    });
-  } else if (/(attention|transformer|softmax|llm|neural network|deep learning)/.test(lower)) {
-    equations.push({
-      id: 'eq-scaled-attention',
-      title: 'Scaled Dot-Product & IO-Tiled Softmax Attention',
-      formula: '\\text{Attention}(Q, K, V) = \\text{softmax}\\left(\\frac{QK^T}{\\sqrt{d_k}} + M\\right)V',
-      variables: [
-        { symbol: 'Q, K, V', meaning: 'Query, Key, and Value projection matrices', unit: '\\mathbb{R}^{N \\times d_k}' },
-        { symbol: '\\sqrt{d_k}', meaning: 'Variance-stabilizing head dimension scaling factor', unit: 'scalar' },
-        { symbol: 'M', meaning: 'Causal or sparse attention mask matrix', unit: '\\{0, -\\infty\\}' },
-      ],
-      intuition:
-        'Normalizing inner products by sqrt(d_k) prevents softmax saturation into vanishing-gradient regions at large embedding dimensions.',
-    });
-  } else if (/(gaussian splatting|radiance field|nerf|photogrammetry|3d reconstruction)/.test(lower)) {
-    equations.push({
-      id: 'eq-3dgs-blending',
-      title: 'Anisotropic 3D Gaussian Alpha-Compositing',
-      formula: 'C(\\mathbf{p}) = \\sum_{i \\in N} c_i \\alpha_i \\prod_{j=1}^{i-1} (1 - \\alpha_j), \\quad \\Sigma\' = J W \\Sigma W^T J^T',
-      variables: [
-        { symbol: '\\Sigma', meaning: '3D covariance matrix R S S^T R^T', unit: '\\mathbb{R}^{3 \\times 3}' },
-        { symbol: 'J, W', meaning: 'Perspective projection Jacobian & viewing transform', unit: 'matrix' },
-        { symbol: '\\alpha_i', meaning: '2D projected Gaussian opacity contribution', unit: '[0, 1]' },
-      ],
-      intuition:
-        'Projects 3D anisotropic Gaussians into 2D screen space via an affine Jacobian approximation for real-time differentiable rasterization.',
-    });
-  } else if (/(econom|inflation|monetary|fiscal|gdp|regression|policy|political|voting|welfare)/.test(lower)) {
-    equations.push({
-      id: 'eq-panel-did',
-      title: 'Two-Way Fixed Effects & Causal Panel Specification',
-      formula: 'Y_{it} = \\alpha_i + \\gamma_t + \\beta \\, D_{it} + \\mathbf{X}_{it}^\\top \\boldsymbol{\\theta} + \\varepsilon_{it}',
-      variables: [
-        { symbol: 'Y_{it}', meaning: 'Observed outcome for unit i at period t', unit: 'dependent variable' },
-        { symbol: '\\alpha_i, \\gamma_t', meaning: 'Unit-level and time-period fixed effects', unit: 'intercepts' },
-        { symbol: '\\beta', meaning: 'Average treatment / policy effect parameter', unit: 'causal elasticity' },
-      ],
-      intuition:
-        'Isolates the policy or treatment effect beta from time-invariant unit heterogeneity and common macroeconomic shocks.',
-    });
-  } else if (/(structural|civil|seismic|finite element|fluid|stress|strain|mechanics)/.test(lower)) {
-    equations.push({
-      id: 'eq-structural-dynamics',
-      title: 'Coupled Structural Dynamics & Damped Equilibrium',
-      formula: '\\mathbf{M}\\ddot{\\mathbf{u}}(t) + \\mathbf{C}\\dot{\\mathbf{u}}(t) + \\mathbf{K}\\mathbf{u}(t) = \\mathbf{F}_{\\text{ext}}(t)',
-      variables: [
-        { symbol: '\\mathbf{M}, \\mathbf{C}, \\mathbf{K}', meaning: 'Mass, damping, and stiffness matrices', unit: 'SI structural matrices' },
-        { symbol: '\\mathbf{u}(t)', meaning: 'Nodal displacement vector over time', unit: 'meters (m)' },
-        { symbol: '\\mathbf{F}_{\\text{ext}}(t)', meaning: 'External seismic or mechanical load excitation', unit: 'Newtons (N)' },
-      ],
-      intuition:
-        'Balances inertial, viscous damping, and elastic restoring forces across discretized finite elements under dynamic loading.',
-    });
-  } else if (/(crispr|protein|hemoglobin|binding|enzyme|kinetics|clinical|gene|biomed)/.test(lower)) {
-    equations.push({
-      id: 'eq-hill-binding',
-      title: 'Cooperative Ligand Binding & Fractional Saturation (Hill Equation)',
-      formula: '\\theta = \\frac{[L]^{n_H}}{K_d + [L]^{n_H}} = \\frac{(p\\text{O}_2)^{n_H}}{(P_{50})^{n_H} + (p\\text{O}_2)^{n_H}}',
-      variables: [
-        { symbol: '\\theta', meaning: 'Fraction of macromolecular binding sites occupied', unit: 'ratio [0, 1]' },
-        { symbol: 'K_d, P_{50}', meaning: 'Apparent dissociation constant / half-saturation pressure', unit: 'concentration / mmHg' },
-        { symbol: 'n_H', meaning: 'Hill coefficient measuring allosteric cooperativity', unit: 'dimensionless' },
-      ],
-      intuition:
-        'Quantifies how cooperative subunit interactions create a steep sigmoidal switch in biological binding affinity.',
-    });
+// Extract genuine technical concepts/terms from a paper's title and abstract for prerequisites & keywords
+export function extractPaperSpecificConcepts(
+  title: string,
+  abstractText: string,
+  domain: DomainCategory
+): string[] {
+  const stopWords = new Set([
+    'the', 'and', 'for', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'have', 'has',
+    'had', 'not', 'but', 'can', 'will', 'into', 'between', 'through', 'using', 'based', 'approach',
+    'method', 'methods', 'study', 'paper', 'results', 'show', 'demonstrate', 'propose', 'present',
+    'analysis', 'model', 'models', 'system', 'systems', 'novel', 'new', 'high', 'low', 'toward',
+    'towards', 'across', 'under', 'over', 'within', 'via', 'their', 'our', 'which', 'where', 'when',
+  ]);
+
+  const combined = `${title}. ${abstractText}`;
+  const phrases: string[] = [];
+
+  // Look for capitalized technical phrases or hyphenated scientific terms
+  const technicalMatches = combined.match(
+    /\b([A-Z][a-zA-Z0-9-]+(?:\s+[A-Z][a-zA-Z0-9-]+){0,2}|[a-zA-Z0-9]+-[a-zA-Z0-9-]+)\b/g
+  ) || [];
+
+  for (const raw of technicalMatches) {
+    const clean = raw.trim().replace(/[.,;:()[\]]+$/, '');
+    if (
+      clean.length >= 4 &&
+      clean.length <= 42 &&
+      !stopWords.has(clean.toLowerCase()) &&
+      !/^(However|Furthermore|Moreover|Therefore|Additionally|Specifically|Finally|In|On|At|By|To|We|The|This|These|Our)$/.test(clean)
+    ) {
+      if (!phrases.some((p) => p.toLowerCase() === clean.toLowerCase())) {
+        phrases.push(clean);
+      }
+    }
+    if (phrases.length >= 5) break;
   }
 
-  return equations;
+  if (phrases.length < 3) {
+    const titleWords = title
+      .split(/[:—–,-]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length >= 5 && s.length <= 48);
+    for (const tw of titleWords) {
+      if (!phrases.some((p) => p.toLowerCase() === tw.toLowerCase())) {
+        phrases.push(tw);
+      }
+      if (phrases.length >= 4) break;
+    }
+  }
+
+  if (phrases.length === 0) {
+    phrases.push(`${domain} Research Methodology`, 'Empirical & Bibliographic Verification');
+  }
+
+  return phrases.slice(0, 5);
+}
+
+// Split an abstract into non-repetitive background, methodology, and findings segments
+export function decomposeAbstractSegments(abstractText: string): {
+  backgroundSegment: string;
+  methodologySteps: string[];
+  findingsSegment: string;
+} {
+  const clean = abstractText.replace(/\s+/g, ' ').trim();
+  const sentences =
+    clean
+      .match(/[^.!?]+[.!?]+(?:\s|$)|[^.!?]+$/g)
+      ?.map((s) => s.trim())
+      .filter((s) => s.length > 12) || [];
+
+  if (sentences.length === 0) {
+    return {
+      backgroundSegment: '',
+      methodologySteps: [],
+      findingsSegment: '',
+    };
+  }
+
+  if (sentences.length === 1) {
+    return {
+      backgroundSegment: sentences[0],
+      methodologySteps: [sentences[0]],
+      findingsSegment: sentences[0],
+    };
+  }
+
+  if (sentences.length === 2) {
+    return {
+      backgroundSegment: sentences[0],
+      methodologySteps: [sentences[0], sentences[1]],
+      findingsSegment: sentences[1],
+    };
+  }
+
+  const bgCount = Math.max(1, Math.floor(sentences.length * 0.3));
+  const findStart = Math.max(bgCount + 1, Math.floor(sentences.length * 0.7));
+
+  const backgroundSegment = sentences.slice(0, bgCount).join(' ');
+  const middleSentences = sentences.slice(bgCount, findStart);
+  const findingsSentences = sentences.slice(findStart);
+
+  return {
+    backgroundSegment,
+    methodologySteps:
+      middleSentences.length > 0 ? middleSentences : sentences.slice(0, Math.min(3, sentences.length)),
+    findingsSegment:
+      findingsSentences.length > 0
+        ? findingsSentences.join(' ')
+        : sentences[sentences.length - 1],
+  };
 }
 
 interface NormalizedCandidate {
@@ -398,20 +442,29 @@ function buildDiscoveryItemFromCandidate(
 ): DiscoveryItem {
   const { artworkTheme, visualSandboxId } = selectArtworkAndSandbox(c.domain);
   const equations = extractEquationsFromText(c.title, c.abstractText, c.domain);
+  const concepts = extractPaperSpecificConcepts(c.title, c.abstractText, c.domain);
+  const { backgroundSegment, methodologySteps, findingsSegment } = decomposeAbstractSegments(
+    c.abstractText
+  );
 
   const summaryDisplay = c.hasRealAbstract
     ? c.abstractText
-    : `Metadata record retrieved from ${contributingSources.join(', ')} (${c.venue || c.sourceName}, ${c.publishedAt}). The publisher did not deposit an open-text abstract in this metadata feed; use the source link to view the original record.`;
+    : `Bibliographic metadata record retrieved from ${contributingSources.join(', ')} (${
+        c.venue || c.sourceName
+      }, ${
+        c.publishedAt
+      }). An open-text abstract was not deposited by the publisher in this index; click "Enrich / Load Full Record" or open the original source link to inspect the manuscript.`;
 
   const shortWhy = c.hasRealAbstract
-    ? c.abstractText.slice(0, 240) + (c.abstractText.length > 240 ? '...' : '')
+    ? (findingsSegment || c.abstractText).slice(0, 260) +
+      ((findingsSegment || c.abstractText).length > 260 ? '...' : '')
     : `${c.evidenceStatus} work published in ${c.venue || c.sourceName} (${c.publishedAt})${
-        c.citationCount > 0 ? ` · Cited ${c.citationCount} times` : ''
+        c.citationCount > 0 ? ` · Cited ${c.citationCount.toLocaleString()} times` : ''
       }.`;
 
   const refs: CitationItem[] = providerLinks.map((pl, idx) => ({
     id: `ref-${c.id}-${idx}`,
-    label: `${c.title} (${pl.providerName} Record)`,
+    label: `${c.title} (${pl.providerName} Primary Record)`,
     authors: c.authors.slice(0, 4).join(', ') || 'Listed on source record',
     venue: c.venue || pl.providerName,
     year: String(c.publicationYear || c.publishedAt.slice(0, 4)),
@@ -424,6 +477,41 @@ function buildDiscoveryItemFromCandidate(
         ? 'Open Access Full Text'
         : 'Verified Bibliographic Record',
   }));
+
+  const accessStatus: DiscoveryItem['accessStatus'] = c.pdfUrl
+    ? 'open_access_pdf'
+    : c.isOpenAccess
+    ? 'open_access_full_text'
+    : c.hasRealAbstract
+    ? 'abstract_and_metadata'
+    : 'metadata_only';
+
+  const retrievalStatus: DiscoveryItem['retrievalStatus'] = c.hasRealAbstract
+    ? 'abstract_and_metadata_retrieved'
+    : 'metadata_only_retrieved';
+
+  const structuredSections: PaperStructuredSection[] = c.hasRealAbstract
+    ? [
+        {
+          id: 'sec-parsed-context',
+          heading: 'Research Context & Problem Statement',
+          content: backgroundSegment || c.abstractText,
+          sourceBasis: 'abstract_synthesis',
+        },
+        {
+          id: 'sec-parsed-methodology',
+          heading: 'Methodology & Analytical Approach',
+          content: methodologySteps.join(' '),
+          sourceBasis: 'abstract_synthesis',
+        },
+        {
+          id: 'sec-parsed-findings',
+          heading: 'Reported Findings & Conclusions',
+          content: findingsSegment || c.abstractText,
+          sourceBasis: 'abstract_synthesis',
+        },
+      ]
+    : [];
 
   return {
     id: c.id,
@@ -446,6 +534,15 @@ function buildDiscoveryItemFromCandidate(
     isLiveFetched: true,
     fullTextAvailable: c.isOpenAccess || Boolean(c.pdfUrl),
     fullTextUrl: c.pdfUrl || c.sourceUrl,
+    pdfUrl: c.pdfUrl,
+    isOpenAccess: c.isOpenAccess,
+    accessStatus,
+    retrievalStatus,
+    hasRealAbstract: c.hasRealAbstract,
+    abstractText: c.hasRealAbstract ? c.abstractText : undefined,
+    keywords: concepts,
+    subjectCategories: [c.domain, c.venue].filter(Boolean),
+    structuredSections,
     highStakesMedicalNotice: c.domain === 'Biomedicine & Genomics',
     relatedRepoQuery: c.associatedRepos[0]?.fullName || query || c.title.slice(0, 50),
     primaryProvider: c.primaryProvider,
@@ -474,7 +571,9 @@ function buildDiscoveryItemFromCandidate(
       learningValue:
         c.isOpenAccess || c.pdfUrl
           ? 'Open-Access PDF / Full Text Available'
-          : 'Verified Abstract & Source Metadata',
+          : c.hasRealAbstract
+          ? 'Verified Author Abstract & Metadata'
+          : 'Bibliographic Metadata Record',
     },
     readerLayers: {
       quickOrientation: summaryDisplay,
@@ -483,77 +582,112 @@ function buildDiscoveryItemFromCandidate(
       }. Venue: ${c.venue || c.sourceName}. Evidence status: ${c.evidenceStatus}. ${
         c.isOpenAccess || c.pdfUrl
           ? `Open-access full text / PDF link available (${c.pdfUrl || c.sourceUrl}).`
-          : 'Only metadata and abstract are openly deposited; full article access is hosted on the original publisher page.'
+          : 'Full manuscript text is hosted on the publisher page.'
       }`,
       beginnerExplanation: c.hasRealAbstract
-        ? `Core research summary (${c.venue || c.sourceName}, ${c.publishedAt}): ${c.abstractText}`
+        ? `In "${c.title}" (${c.venue || c.sourceName}, ${c.publishedAt}), ${
+            c.authors.slice(0, 3).join(', ') || 'the authors'
+          } investigate: ${backgroundSegment || c.abstractText}`
         : `This ${c.evidenceStatus.toLowerCase()} record ("${c.title}") was published in ${
             c.venue || c.sourceName
           } (${c.publishedAt}). Open the source link to read the full manuscript.`,
       beginnerExplanationHinglish: c.hasRealAbstract
         ? `Yeh research ("${c.title}", ${c.publishedAt}) ${
             c.venue || c.sourceName
-          } se retrieve kiya gaya hai: ${c.abstractText.slice(0, 420)}`
+          } mein publish hua hai: ${backgroundSegment || c.abstractText.slice(0, 420)}`
         : `Yeh paper ("${c.title}") ${c.venue || c.sourceName} (${
             c.publishedAt
           }) mein published hai. Full manuscript padhne ke liye primary source link dekhein.`,
-      prerequisites: [
-        `Foundational concepts in ${c.domain}`,
-        'Empirical research design & citation verification',
-      ],
-      historicalFoundations: `Published in ${c.venue || c.sourceName} (${c.publishedAt}). ${
+      prerequisites: concepts,
+      historicalFoundations: `${
+        backgroundSegment ? `${backgroundSegment}\n\n` : ''
+      }Bibliographic Context: Published in ${c.venue || c.sourceName} (${
+        c.publishedAt
+      }) by ${c.authors.slice(0, 6).join(', ') || 'listed authors'}.${
         c.citationCount > 0
-          ? `Cited by ${c.citationCount.toLocaleString()} subsequent scholarly works.`
-          : 'Indexed in multi-source scholarly discovery.'
+          ? ` Cited by ${c.citationCount.toLocaleString()} scholarly works.`
+          : ''
+      }${
+        c.referenceCount > 0
+          ? ` References ${c.referenceCount.toLocaleString()} prior works.`
+          : ''
       }`,
       coreMechanism: c.hasRealAbstract
         ? [
-            c.abstractText,
-            `Source provenance: ${contributingSources.join(' · ')} (${c.canonicalId}).`,
+            ...methodologySteps,
+            `Bibliographic & Identifier Verification: Indexed across ${contributingSources.join(
+              ', '
+            )} with canonical identifier ${c.canonicalId}${
+              c.doi ? ` (DOI: ${c.doi})` : ''
+            }${c.arxivId ? ` (arXiv:${c.arxivId})` : ''}${
+              c.pmid ? ` (PMID:${c.pmid})` : ''
+            }.`,
           ]
         : [
-            'Full methodological details are hosted on the publisher page (open abstract not deposited in metadata feed).',
+            `Primary bibliographic record verified via ${contributingSources.join(', ')} (${
+              c.canonicalId
+            }).`,
+            'Detailed experimental protocols and mathematical derivations are hosted on the primary publisher record (open-text abstract not deposited in index).',
           ],
-      coreMechanismHinglish: [
-        c.hasRealAbstract
-          ? c.abstractText
-          : 'Full methodology publisher ke original page par upalabdh hai.',
-      ],
-      methodsAndEvidence: `Venue: ${c.venue || c.sourceName} (${c.publishedAt}). Evidence status: ${
-        c.evidenceStatus
-      }. Citations recorded: ${c.citationCount}.`,
+      coreMechanismHinglish: c.hasRealAbstract
+        ? methodologySteps
+        : ['Full methodology publisher ke original page par upalabdh hai.'],
+      methodsAndEvidence: `Publication Venue: ${c.venue || c.sourceName} (${
+        c.publishedAt
+      }) · Evidence Tier: ${c.evidenceStatus} · Citation Count: ${c.citationCount.toLocaleString()} · References Recorded: ${c.referenceCount.toLocaleString()} · Indexed Sources: ${contributingSources.join(
+        ', '
+      )}.`,
       findings: c.hasRealAbstract
-        ? c.abstractText
-        : 'Open the original DOI/source record to inspect full experimental findings, tables, and figures.',
+        ? findingsSegment || c.abstractText
+        : 'Open the original DOI/source record or click "Load Deep Record" to inspect full experimental findings, tables, and figures.',
       limitationsAndUncertainty:
         c.evidenceStatus === 'Preprint / Not Yet Peer-Reviewed'
-          ? 'Preprint Notice: This manuscript is a scientific preprint and has not yet completed formal journal peer review. Verify claims against independent replications.'
-          : c.isOpenAccess
-          ? 'Open-access article. Always inspect sample sizes, statistical controls, and boundary conditions in the full text.'
-          : 'Metadata-only record in open indices; inspect the full publisher text for complete methodological controls.',
-      applicationsAndImplications: `Contributes to ${c.domain} literature and connected citation graphs.`,
+          ? `Preprint Notice: "${c.title}" is a scientific preprint (${c.venue || c.sourceName}) and has not yet completed formal journal peer review. Evaluate sample sizes, baseline comparisons, and replication status before generalizing.`
+          : c.isOpenAccess || c.pdfUrl
+          ? `Open-Access Manuscript: While the abstract summarizes core outcomes for "${c.title}", always inspect the full PDF (${
+              c.pdfUrl || c.sourceUrl
+            }) for complete boundary assumptions, statistical power, and ablations.`
+          : `Access Scope Notice: Only bibliographic metadata ${
+              c.hasRealAbstract ? 'and the author abstract ' : ''
+            }are openly deposited in public APIs for "${c.title}". Full methodological controls and appendices require accessing the publisher page (${
+              c.sourceUrl
+            }).`,
+      applicationsAndImplications: `Advances ${c.domain} research (${concepts
+        .slice(0, 3)
+        .join(', ')}) as documented in ${c.venue || c.sourceName} (${c.publishedAt}).`,
       criticalAnalysisAndFalsifiability:
-        'Examine citing literature and replication studies in the Citation Network Graph below to evaluate external validity.',
+        'Use the interactive Citation Network Graph below to inspect independent citing studies, foundational references, and companion code repositories that test or extend these findings.',
       relatedWork: providerLinks.map((p) => `${p.providerName}: ${p.url}`),
-      whatToWatchNext: 'Track incoming citations and related code implementations.',
+      whatToWatchNext: `Monitor incoming citations (${c.citationCount.toLocaleString()} to date) and replication benchmarks for "${c.title.slice(
+        0,
+        70
+      )}".`,
       references: refs,
     },
     equations,
     quiz: [
       {
         id: `quiz-${c.id}`,
-        question: `What is the verification status and provenance of "${c.title.slice(0, 60)}..."?`,
+        question: `What is the verified publication status and source provenance of "${c.title.slice(
+          0,
+          75
+        )}"?`,
         options: [
           'Unverified social media post without bibliographic identifiers',
-          `${c.evidenceStatus} indexed via ${contributingSources.join(', ')} (${c.publishedAt})`,
-          'Synthetic mockup record with no external link',
-          'Guaranteed universal law requiring no methodological inspection',
+          `${c.evidenceStatus} published in ${c.venue || c.sourceName} (${
+            c.publishedAt
+          }), verified via ${contributingSources.join(', ')}`,
+          'Synthetic placeholder article with fabricated metadata',
+          'Informal blog post without academic authorship',
         ],
         correctIndex: 1,
-        explanationWhyRight: `This record was retrieved from ${contributingSources.join(
+        explanationWhyRight: `"${c.title}" was retrieved from ${contributingSources.join(
           ', '
-        )} with status "${c.evidenceStatus}" and publication date ${c.publishedAt}.`,
-        misconceptionDiagnosed: 'Always distinguish preprints, peer-reviewed articles, and metadata-only records.',
+        )} with status "${c.evidenceStatus}", venue "${
+          c.venue || c.sourceName
+        }", and publication date ${c.publishedAt}.`,
+        misconceptionDiagnosed:
+          'Always verify publication venue, peer-review status, and canonical identifiers (DOI / arXiv / PMID).',
       },
     ],
   };
@@ -2431,3 +2565,746 @@ export async function fetchCitationNetworkAndRelated(opts: {
     retrievedAt,
   };
 }
+
+// ============================================================================
+// UNIVERSAL PAPER RECORD RESOLVER & DEEP MULTI-SOURCE ENRICHMENT ENGINE
+// ============================================================================
+
+function cleanText(raw?: string | null): string {
+  if (!raw) return '';
+  return String(raw)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractXmlTag(xml: string, tag: string): string {
+  const regex = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i');
+  const match = xml.match(regex);
+  return match ? match[1].trim() : '';
+}
+
+function normalizeTitleForDedupe(raw?: string | null): string {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export async function fetchAndEnrichPaperRecord(opts: {
+  paperId?: string;
+  canonicalId?: string;
+  doi?: string;
+  arxivId?: string;
+  pmid?: string;
+  pmcid?: string;
+  title?: string;
+  existingItem?: DiscoveryItem;
+}): Promise<{
+  item: DiscoveryItem | null;
+  sourcesChecked: string[];
+  enrichedFields: string[];
+  retrievedAt: string;
+}> {
+  const retrievedAt = new Date().toISOString();
+  const sourcesChecked: string[] = [];
+  const enrichedFields: string[] = [];
+
+  let baseItem: DiscoveryItem | null = opts.existingItem ? { ...opts.existingItem } : null;
+
+  const rawId = (opts.paperId || opts.canonicalId || '').trim();
+  let cleanDoi = normalizeDoi(opts.doi || baseItem?.doi || (rawId.startsWith('doi:') ? rawId.slice(4) : undefined));
+  let cleanArxiv = (
+    opts.arxivId ||
+    baseItem?.arxivId ||
+    (rawId.startsWith('arxiv:') ? rawId.slice(6) : undefined) ||
+    (rawId.startsWith('live-arxiv-') ? rawId.replace(/^live-arxiv-/i, '') : undefined) ||
+    ''
+  )
+    .replace(/^arxiv:/i, '')
+    .trim();
+  let cleanPmid = (
+    opts.pmid ||
+    baseItem?.pmid ||
+    (rawId.startsWith('pmid:') ? rawId.slice(5) : undefined) ||
+    (rawId.startsWith('live-pubmed-') ? rawId.replace(/^live-pubmed-/i, '') : undefined) ||
+    ''
+  ).trim();
+  let cleanPmcid = (
+    opts.pmcid ||
+    baseItem?.pmcid ||
+    (rawId.startsWith('pmc:') ? rawId.slice(4) : undefined) ||
+    ''
+  ).trim();
+  let openalexShortId =
+    baseItem?.openalexId ||
+    (rawId.startsWith('live-openalex-')
+      ? rawId.replace(/^live-openalex-/i, '').toUpperCase()
+      : rawId.startsWith('openalex:')
+      ? rawId.slice(9).toUpperCase()
+      : '');
+
+  // Step 1: If we don't have a baseItem yet (e.g., direct URL load with ?paper=...), resolve it from OpenAlex, arXiv, Europe PMC, or Semantic Scholar
+  if (!baseItem) {
+    try {
+      let oaWork: any = null;
+      if (openalexShortId && /^W\d+$/i.test(openalexShortId)) {
+        sourcesChecked.push('OpenAlex Direct ID');
+        const res = await fetchProviderUrl(
+          `https://api.openalex.org/works/${openalexShortId}?mailto=${encodeURIComponent(POLITE_EMAIL)}`
+        );
+        if (res.ok) oaWork = await res.json();
+      } else if (cleanDoi) {
+        sourcesChecked.push('OpenAlex DOI Resolver');
+        const res = await fetchProviderUrl(
+          `https://api.openalex.org/works/https://doi.org/${encodeURIComponent(cleanDoi)}?mailto=${encodeURIComponent(POLITE_EMAIL)}`
+        );
+        if (res.ok) oaWork = await res.json();
+      } else if (cleanPmid) {
+        sourcesChecked.push('OpenAlex PMID Resolver');
+        const res = await fetchProviderUrl(
+          `https://api.openalex.org/works/pmid:${encodeURIComponent(cleanPmid)}?mailto=${encodeURIComponent(POLITE_EMAIL)}`
+        );
+        if (res.ok) oaWork = await res.json();
+      } else if (opts.title || rawId) {
+        const searchQ = opts.title || rawId.replace(/^live-[a-z0-9_]+-/i, '').replace(/[-_]/g, ' ');
+        if (searchQ.length > 3) {
+          sourcesChecked.push('OpenAlex Search');
+          const res = await queryOpenAlex({ query: searchQ, perProviderLimit: 1 });
+          if (res.candidates.length > 0) {
+            baseItem = buildDiscoveryItemFromCandidate(
+              res.candidates[0],
+              [res.candidates[0].providerDisplayName],
+              [
+                {
+                  providerId: res.candidates[0].primaryProvider,
+                  providerName: res.candidates[0].providerDisplayName,
+                  url: res.candidates[0].sourceUrl,
+                },
+              ],
+              retrievedAt,
+              searchQ
+            );
+          }
+        }
+      }
+
+      if (oaWork && oaWork.title) {
+        const oaRes = await queryOpenAlex({ query: oaWork.title, perProviderLimit: 1 });
+        if (oaRes.candidates.length > 0) {
+          const cand = oaRes.candidates[0];
+          baseItem = buildDiscoveryItemFromCandidate(
+            cand,
+            ['OpenAlex'],
+            [{ providerId: 'openalex', providerName: 'OpenAlex', url: cand.sourceUrl }],
+            retrievedAt,
+            oaWork.title
+          );
+          if (opts.paperId) baseItem.id = opts.paperId;
+        }
+      }
+    } catch {
+      // continue to fallback resolvers
+    }
+  }
+
+  // If still no baseItem and we have an arXiv ID, resolve via arXiv API directly
+  if (!baseItem && cleanArxiv) {
+    try {
+      sourcesChecked.push('arXiv Atom API');
+      const axRes = await queryArxiv({ query: cleanArxiv, perProviderLimit: 1 });
+      if (axRes.candidates.length > 0) {
+        const cand = axRes.candidates[0];
+        baseItem = buildDiscoveryItemFromCandidate(
+          cand,
+          ['arXiv'],
+          [{ providerId: 'arxiv', providerName: 'arXiv', url: cand.sourceUrl }],
+          retrievedAt,
+          cleanArxiv
+        );
+        if (opts.paperId) baseItem.id = opts.paperId;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  if (!baseItem) {
+    return { item: null, sourcesChecked, enrichedFields, retrievedAt };
+  }
+
+  // Sync identifiers from baseItem
+  cleanDoi = cleanDoi || normalizeDoi(baseItem.doi);
+  cleanArxiv = cleanArxiv || (baseItem.arxivId || '').replace(/^arxiv:/i, '').trim();
+  cleanPmid = cleanPmid || (baseItem.pmid || '').trim();
+  cleanPmcid = cleanPmcid || (baseItem.pmcid || '').trim();
+
+  let bestAbstract =
+    baseItem.abstractText ||
+    (baseItem.hasRealAbstract ? baseItem.readerLayers.quickOrientation : '') ||
+    '';
+  let tldrSummary = baseItem.tldrSummary;
+  const structuredSections: PaperStructuredSection[] = [...(baseItem.structuredSections || [])];
+  const figures: PaperFigureItem[] = [...(baseItem.figures || [])];
+  const tables: PaperTableItem[] = [...(baseItem.tables || [])];
+  const equations: EquationSpec[] = [...(baseItem.equations || [])];
+  const references: CitationItem[] = [...(baseItem.readerLayers?.references || [])];
+  const associatedRepos: AssociatedCodeRepo[] = [...(baseItem.associatedRepos || [])];
+  const contributingSources = new Set<string>(baseItem.contributingSources || [baseItem.sourceName]);
+
+  // Step 2: Semantic Scholar Graph API enrichment (abstract, SciTLDR, externalIds, openAccessPdf, citations & references)
+  try {
+    let s2LookupId = '';
+    if (cleanDoi) s2LookupId = `DOI:${cleanDoi}`;
+    else if (cleanArxiv) s2LookupId = `ARXIV:${cleanArxiv.replace(/v\d+$/i, '')}`;
+    else if (cleanPmid) s2LookupId = `PMID:${cleanPmid}`;
+    else if (baseItem.semanticScholarId) s2LookupId = baseItem.semanticScholarId;
+
+    const s2Fields =
+      'title,abstract,tldr,year,publicationDate,venue,publicationVenue,citationCount,referenceCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,citations.title,citations.year,citations.authors,citations.venue,citations.externalIds,references.title,references.year,references.authors,references.venue,references.externalIds';
+
+    let s2Data: any = null;
+    if (s2LookupId) {
+      sourcesChecked.push('Semantic Scholar Graph API');
+      const s2Res = await fetchProviderUrl(
+        `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(s2LookupId)}?fields=${s2Fields}`,
+        {},
+        6500
+      );
+      if (s2Res.ok) {
+        s2Data = await s2Res.json();
+      }
+    } else if (baseItem.title) {
+      sourcesChecked.push('Semantic Scholar Title Match');
+      const s2Search = await fetchProviderUrl(
+        `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(
+          baseItem.title.slice(0, 120)
+        )}&limit=1&fields=${s2Fields}`,
+        {},
+        6500
+      );
+      if (s2Search.ok) {
+        const searchJson = await s2Search.json();
+        const topHit = searchJson?.data?.[0];
+        if (
+          topHit &&
+          normalizeTitleForDedupe(topHit.title || '') === normalizeTitleForDedupe(baseItem.title)
+        ) {
+          s2Data = topHit;
+        }
+      }
+    }
+
+    if (s2Data && s2Data.title) {
+      contributingSources.add('Semantic Scholar');
+      if (s2Data.paperId) baseItem.semanticScholarId = s2Data.paperId;
+
+      if (s2Data.externalIds) {
+        if (!cleanDoi && s2Data.externalIds.DOI) {
+          cleanDoi = normalizeDoi(s2Data.externalIds.DOI);
+          baseItem.doi = cleanDoi;
+          enrichedFields.push('doi');
+        }
+        if (!cleanArxiv && s2Data.externalIds.ArXiv) {
+          cleanArxiv = String(s2Data.externalIds.ArXiv).trim();
+          baseItem.arxivId = cleanArxiv;
+          enrichedFields.push('arxivId');
+        }
+        if (!cleanPmid && s2Data.externalIds.PubMed) {
+          cleanPmid = String(s2Data.externalIds.PubMed).trim();
+          baseItem.pmid = cleanPmid;
+          enrichedFields.push('pmid');
+        }
+        if (!cleanPmcid && s2Data.externalIds.PubMedCentral) {
+          cleanPmcid = String(s2Data.externalIds.PubMedCentral).trim();
+          if (!cleanPmcid.toUpperCase().startsWith('PMC')) cleanPmcid = `PMC${cleanPmcid}`;
+          baseItem.pmcid = cleanPmcid;
+          enrichedFields.push('pmcid');
+        }
+      }
+
+      if (s2Data.abstract && String(s2Data.abstract).trim().length > bestAbstract.length) {
+        bestAbstract = cleanText(s2Data.abstract);
+        enrichedFields.push('abstract');
+      }
+
+      if (s2Data.tldr?.text) {
+        tldrSummary = cleanText(s2Data.tldr.text);
+        enrichedFields.push('tldrSummary');
+      }
+
+      if (s2Data.openAccessPdf?.url && !baseItem.pdfUrl) {
+        baseItem.pdfUrl = s2Data.openAccessPdf.url;
+        baseItem.fullTextUrl = s2Data.openAccessPdf.url;
+        baseItem.fullTextAvailable = true;
+        baseItem.isOpenAccess = true;
+        enrichedFields.push('pdfUrl');
+      }
+
+      if (
+        typeof s2Data.citationCount === 'number' &&
+        s2Data.citationCount > (baseItem.citationCount || 0)
+      ) {
+        baseItem.citationCount = s2Data.citationCount;
+      }
+      if (
+        typeof s2Data.referenceCount === 'number' &&
+        s2Data.referenceCount > (baseItem.referenceCount || 0)
+      ) {
+        baseItem.referenceCount = s2Data.referenceCount;
+      }
+
+      // Add real reference & citation records to references
+      const refItems = Array.isArray(s2Data.references) ? s2Data.references.slice(0, 8) : [];
+      for (const ref of refItems) {
+        if (!ref?.title) continue;
+        const refDoi = normalizeDoi(ref.externalIds?.DOI);
+        const refUrl = refDoi
+          ? `https://doi.org/${refDoi}`
+          : ref.externalIds?.ArXiv
+          ? `https://arxiv.org/abs/${ref.externalIds.ArXiv}`
+          : 'https://www.semanticscholar.org';
+        const refId = `ref-s2-${normalizeTitleForDedupe(ref.title).slice(0, 24)}`;
+        if (
+          !references.some(
+            (c) => normalizeTitleForDedupe(c.label) === normalizeTitleForDedupe(ref.title)
+          )
+        ) {
+          references.push({
+            id: refId,
+            label: ref.title,
+            authors: Array.isArray(ref.authors)
+              ? ref.authors
+                  .slice(0, 3)
+                  .map((a: any) => a.name)
+                  .filter(Boolean)
+                  .join(', ') || 'Listed Authors'
+              : 'Listed Authors',
+            venue: ref.venue || 'Referenced Scholarly Work',
+            year: String(ref.year || ''),
+            url: refUrl,
+            doiOrId: refDoi || ref.externalIds?.ArXiv || undefined,
+            statusLabel: 'Foundational / Referenced in Manuscript',
+          });
+        }
+      }
+
+      const citItems = Array.isArray(s2Data.citations) ? s2Data.citations.slice(0, 6) : [];
+      for (const cit of citItems) {
+        if (!cit?.title) continue;
+        const citDoi = normalizeDoi(cit.externalIds?.DOI);
+        const citUrl = citDoi
+          ? `https://doi.org/${citDoi}`
+          : cit.externalIds?.ArXiv
+          ? `https://arxiv.org/abs/${cit.externalIds.ArXiv}`
+          : 'https://www.semanticscholar.org';
+        const citId = `cit-s2-${normalizeTitleForDedupe(cit.title).slice(0, 24)}`;
+        if (
+          !references.some(
+            (c) => normalizeTitleForDedupe(c.label) === normalizeTitleForDedupe(cit.title)
+          )
+        ) {
+          references.push({
+            id: citId,
+            label: cit.title,
+            authors: Array.isArray(cit.authors)
+              ? cit.authors
+                  .slice(0, 3)
+                  .map((a: any) => a.name)
+                  .filter(Boolean)
+                  .join(', ') || 'Listed Authors'
+              : 'Listed Authors',
+            venue: cit.venue || 'Subsequent Citing Work',
+            year: String(cit.year || ''),
+            url: citUrl,
+            doiOrId: citDoi || cit.externalIds?.ArXiv || undefined,
+            statusLabel: 'Cites This Paper',
+          });
+        }
+      }
+    }
+  } catch {
+    // continue
+  }
+
+  // Step 3: If arXiv ID is present, fetch official arXiv Atom entry for raw LaTeX abstract & direct PDF link
+  if (cleanArxiv) {
+    try {
+      sourcesChecked.push('arXiv Official Atom API');
+      const axIdClean = cleanArxiv.replace(/^arxiv:/i, '').replace(/v\d+$/i, '');
+      const axRes = await fetchProviderUrl(
+        `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(axIdClean)}`,
+        {},
+        6000
+      );
+      if (axRes.ok) {
+        const xml = await axRes.text();
+        const entryMatch = xml.match(/<entry>([\s\S]*?)<\/entry>/i);
+        if (entryMatch) {
+          contributingSources.add('arXiv');
+          const entryXml = entryMatch[1];
+          const rawSummary = extractXmlTag(entryXml, 'summary');
+          if (rawSummary && rawSummary.length > 40) {
+            if (
+              rawSummary.length >= bestAbstract.length ||
+              rawSummary.includes('$') ||
+              rawSummary.includes('\\')
+            ) {
+              bestAbstract = rawSummary;
+              enrichedFields.push('arxivLatexAbstract');
+            }
+            const axEqs = extractEquationsFromText(baseItem.title, rawSummary, baseItem.domain);
+            for (const eq of axEqs) {
+              if (!equations.some((e) => e.formula === eq.formula)) {
+                equations.push(eq);
+              }
+            }
+          }
+          const pdfUrl = `https://arxiv.org/pdf/${axIdClean}.pdf`;
+          if (!baseItem.pdfUrl) {
+            baseItem.pdfUrl = pdfUrl;
+            baseItem.fullTextUrl = pdfUrl;
+            baseItem.fullTextAvailable = true;
+            baseItem.isOpenAccess = true;
+            enrichedFields.push('arxivPdfUrl');
+          }
+        }
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  // Step 4: Europe PMC Full-Text JATS XML & Bio-Literature Enrichment (extracts real manuscript sections, figures, tables, and <tex-math> equations!)
+  try {
+    if (!cleanPmcid && (cleanDoi || cleanPmid)) {
+      const epmcQuery = cleanPmid ? `EXT_ID:${cleanPmid}` : `DOI:"${cleanDoi}"`;
+      const epmcSearch = await fetchProviderUrl(
+        `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(
+          epmcQuery
+        )}&resultType=core&format=json&pageSize=1`,
+        {},
+        6000
+      );
+      if (epmcSearch.ok) {
+        const epmcJson = await epmcSearch.json();
+        const rec = epmcJson?.resultList?.result?.[0];
+        if (rec) {
+          contributingSources.add('Europe PMC');
+          if (rec.pmcid) {
+            cleanPmcid = String(rec.pmcid).trim();
+            baseItem.pmcid = cleanPmcid;
+          }
+          if (rec.pmid && !cleanPmid) {
+            cleanPmid = String(rec.pmid).trim();
+            baseItem.pmid = cleanPmid;
+          }
+          if (rec.abstractText && String(rec.abstractText).length > bestAbstract.length) {
+            bestAbstract = cleanText(rec.abstractText);
+            enrichedFields.push('europePmcAbstract');
+          }
+          if (rec.isOpenAccess === 'Y' && rec.pmcid && !baseItem.pdfUrl) {
+            baseItem.pdfUrl = `https://europepmc.org/backend/ptpmcrender.fcgi?accid=${rec.pmcid}&blobtype=pdf`;
+            baseItem.fullTextUrl = `https://europepmc.org/article/PMC/${rec.pmcid}`;
+            baseItem.fullTextAvailable = true;
+            baseItem.isOpenAccess = true;
+          }
+        }
+      }
+    }
+
+    if (cleanPmcid && /^PMC\d+$/i.test(cleanPmcid)) {
+      sourcesChecked.push(`Europe PMC Full-Text XML (${cleanPmcid})`);
+      const xmlRes = await fetchProviderUrl(
+        `https://www.ebi.ac.uk/europepmc/webservices/rest/${encodeURIComponent(
+          cleanPmcid
+        )}/fullTextXML`,
+        {},
+        7500
+      );
+      if (xmlRes.ok) {
+        const jatsXml = await xmlRes.text();
+        if (jatsXml && jatsXml.includes('<body')) {
+          contributingSources.add('Europe PMC Open-Access Full Text');
+          enrichedFields.push('fullTextXmlSections');
+
+          // Extract top-level <sec> sections inside <body>
+          const bodyMatch = jatsXml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+          if (bodyMatch) {
+            const bodyXml = bodyMatch[1];
+            const secMatches = bodyXml.match(/<sec[^>]*>[\s\S]*?<\/sec>/gi) || [];
+            const extractedRealSections: PaperStructuredSection[] = [];
+            for (const secXml of secMatches.slice(0, 10)) {
+              const titleMatch = secXml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+              const heading = titleMatch ? cleanText(titleMatch[1]) : '';
+              if (!heading || heading.length > 100) continue;
+              const paragraphs = (secXml.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [])
+                .map((p) => cleanText(p))
+                .filter((p) => p.length > 40);
+              if (paragraphs.length > 0) {
+                const content = paragraphs.slice(0, 3).join('\n\n').slice(0, 1800);
+                if (
+                  !extractedRealSections.some(
+                    (s) => s.heading.toLowerCase() === heading.toLowerCase()
+                  )
+                ) {
+                  extractedRealSections.push({
+                    id: `jats-sec-${extractedRealSections.length + 1}`,
+                    heading,
+                    content,
+                    sourceBasis: 'full_text',
+                  });
+                }
+              }
+            }
+            if (extractedRealSections.length > 0) {
+              structuredSections.splice(0, structuredSections.length, ...extractedRealSections);
+            }
+          }
+
+          // Extract <fig> captions from JATS XML
+          const figMatches = jatsXml.match(/<fig[^>]*>([\s\S]*?)<\/fig>/gi) || [];
+          for (const figXml of figMatches.slice(0, 6)) {
+            const label = cleanText(
+              extractXmlTag(figXml, 'label') || `Figure ${figures.length + 1}`
+            );
+            const caption = cleanText(extractXmlTag(figXml, 'caption'));
+            if (caption && caption.length > 15) {
+              figures.push({
+                id: `fig-${figures.length + 1}`,
+                label,
+                caption: caption.slice(0, 500),
+                sourceNote: `Europe PMC Full Text (${cleanPmcid})`,
+              });
+            }
+          }
+
+          // Extract <table-wrap> captions and headers from JATS XML
+          const tableMatches = jatsXml.match(/<table-wrap[^>]*>([\s\S]*?)<\/table-wrap>/gi) || [];
+          for (const tblXml of tableMatches.slice(0, 4)) {
+            const label = cleanText(extractXmlTag(tblXml, 'label') || `Table ${tables.length + 1}`);
+            const caption = cleanText(
+              extractXmlTag(tblXml, 'caption') || 'Manuscript Data Table'
+            );
+            const trMatches = tblXml.match(/<tr[^>]*>([\s\S]*?)<\/tr>/gi) || [];
+            if (trMatches.length >= 2) {
+              const parseRow = (tr: string) =>
+                (tr.match(/<(?:th|td)[^>]*>([\s\S]*?)<\/(?:th|td)>/gi) || [])
+                  .map((cell) => cleanText(cell).slice(0, 80))
+                  .slice(0, 6);
+              const headers = parseRow(trMatches[0] || '');
+              const rows = trMatches
+                .slice(1, 6)
+                .map(parseRow)
+                .filter((r) => r.length > 0);
+              if (headers.length > 0 && rows.length > 0) {
+                tables.push({
+                  id: `tbl-${tables.length + 1}`,
+                  caption: `${label}: ${caption.slice(0, 280)}`,
+                  headers,
+                  rows,
+                });
+              }
+            }
+          }
+
+          // Extract <tex-math> equations from JATS XML
+          const texMatches = jatsXml.match(/<tex-math[^>]*>([\s\S]*?)<\/tex-math>/gi) || [];
+          for (const tm of texMatches.slice(0, 5)) {
+            let rawTex = tm.replace(/<\/?tex-math[^>]*>/gi, '').trim();
+            const docMatch = rawTex.match(/\\begin\{document\}([\s\S]*?)\\end\{document\}/i);
+            if (docMatch) rawTex = docMatch[1].trim();
+            rawTex = rawTex.replace(/^\$\$?|\$\$?$/g, '').trim();
+            if (
+              rawTex.length >= 4 &&
+              rawTex.length <= 280 &&
+              !equations.some((e) => e.formula === rawTex)
+            ) {
+              equations.push({
+                id: `jats-eq-${equations.length + 1}`,
+                title: `Manuscript Equation (${equations.length + 1})`,
+                formula: rawTex,
+                intuition: `Mathematical expression extracted directly from the full-text XML of "${baseItem.title.slice(
+                  0,
+                  65
+                )}".`,
+                variables: [
+                  {
+                    symbol: 'Source',
+                    meaning: `Europe PMC Full-Text XML (${cleanPmcid})`,
+                    unit: 'manuscript notation',
+                  },
+                ],
+              });
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // continue
+  }
+
+  // Step 5: Query Hugging Face Papers / Papers with Code for verified companion GitHub repositories
+  try {
+    const pwcQuery = cleanArxiv || baseItem.title.slice(0, 75);
+    const pwcRes = await fetchProviderUrl(
+      `https://huggingface.co/api/papers/search?q=${encodeURIComponent(pwcQuery)}`,
+      {},
+      5000
+    );
+    if (pwcRes.ok) {
+      sourcesChecked.push('Papers with Code / Hugging Face Papers');
+      const pwcData = await pwcRes.json();
+      if (Array.isArray(pwcData)) {
+        for (const entry of pwcData.slice(0, 4)) {
+          const p = entry?.paper || entry;
+          if (p?.githubRepo) {
+            const ghUrl = String(p.githubRepo).trim();
+            const fullName = ghUrl.replace(/^https?:\/\/github\.com\//i, '').replace(/\/+$/, '');
+            if (
+              fullName.includes('/') &&
+              !associatedRepos.some((r) => r.fullName.toLowerCase() === fullName.toLowerCase())
+            ) {
+              const isExactMatch =
+                (cleanArxiv && p.id === cleanArxiv.replace(/v\d+$/i, '')) ||
+                normalizeTitleForDedupe(String(p.title || '')) ===
+                  normalizeTitleForDedupe(baseItem.title);
+              associatedRepos.push({
+                fullName,
+                url: ghUrl,
+                stars: typeof p.githubStars === 'number' ? p.githubStars : undefined,
+                description: isExactMatch
+                  ? `Verified official code repository linked to "${baseItem.title.slice(0, 60)}"`
+                  : `Related research implementation (${p.title})`,
+                provenance: isExactMatch ? 'Papers with Code / HF Verified' : 'Topic Recommendation',
+                matchConfidence: isExactMatch ? 'high_verified' : 'topic_related',
+                evidenceNote: isExactMatch
+                  ? `Exact paper match via Hugging Face Papers / Papers with Code (${
+                      p.id || 'Title Match'
+                    })`
+                  : `Topic match via Hugging Face Papers search`,
+              });
+              enrichedFields.push('associatedRepos');
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Step 6: Recompute structured reader layers & equations if we enriched the abstract or full text
+  const hasRealAbstract =
+    bestAbstract.trim().length > 25 &&
+    !bestAbstract.startsWith('Metadata record retrieved from') &&
+    !bestAbstract.startsWith('Bibliographic metadata record retrieved from');
+  if (hasRealAbstract) {
+    baseItem.hasRealAbstract = true;
+    baseItem.abstractText = bestAbstract;
+    const extractedEqs = extractEquationsFromText(baseItem.title, bestAbstract, baseItem.domain);
+    for (const eq of extractedEqs) {
+      if (!equations.some((e) => e.formula === eq.formula)) {
+        equations.push(eq);
+      }
+    }
+
+    const { backgroundSegment, methodologySteps, findingsSegment } =
+      decomposeAbstractSegments(bestAbstract);
+
+    baseItem.readerLayers = {
+      ...baseItem.readerLayers,
+      quickOrientation: bestAbstract,
+      beginnerExplanation: tldrSummary
+        ? `${tldrSummary}\n\nContext from "${baseItem.title}" (${
+            baseItem.venue || baseItem.sourceName
+          }, ${baseItem.publishedAt}): ${backgroundSegment}`
+        : `In "${baseItem.title}" (${baseItem.venue || baseItem.sourceName}, ${
+            baseItem.publishedAt
+          }), ${
+            baseItem.authors.slice(0, 3).join(', ') || 'the authors'
+          } investigate: ${backgroundSegment || bestAbstract}`,
+      coreMechanism: [
+        ...methodologySteps,
+        `Bibliographic & Identifier Verification: Indexed across ${Array.from(
+          contributingSources
+        ).join(', ')} with canonical identifier ${baseItem.canonicalId}${
+          cleanDoi ? ` (DOI: ${cleanDoi})` : ''
+        }${cleanArxiv ? ` (arXiv:${cleanArxiv})` : ''}${
+          cleanPmid ? ` (PMID:${cleanPmid})` : ''
+        }.`,
+      ],
+      findings: findingsSegment || bestAbstract,
+      references,
+    };
+
+    if (
+      structuredSections.length === 0 ||
+      structuredSections.every((s) => s.sourceBasis === 'abstract_synthesis')
+    ) {
+      structuredSections.splice(
+        0,
+        structuredSections.length,
+        {
+          id: 'sec-abstract-overview',
+          heading: 'Abstract & Problem Context',
+          content: backgroundSegment || bestAbstract,
+          sourceBasis: 'abstract_synthesis',
+        },
+        {
+          id: 'sec-parsed-methodology',
+          heading: 'Methodology & Analytical Approach',
+          content: methodologySteps.join(' '),
+          sourceBasis: 'abstract_synthesis',
+        },
+        {
+          id: 'sec-parsed-findings',
+          heading: 'Reported Findings & Conclusions',
+          content: findingsSegment || bestAbstract,
+          sourceBasis: 'abstract_synthesis',
+        }
+      );
+    }
+  } else {
+    baseItem.readerLayers = {
+      ...baseItem.readerLayers,
+      references,
+    };
+  }
+
+  baseItem.tldrSummary = tldrSummary;
+  baseItem.structuredSections = structuredSections;
+  baseItem.figures = figures;
+  baseItem.tables = tables;
+  baseItem.equations = equations;
+  baseItem.associatedRepos = associatedRepos;
+  baseItem.contributingSources = Array.from(contributingSources);
+  baseItem.retrievalStatus =
+    structuredSections.some((s) => s.sourceBasis === 'full_text') || baseItem.pdfUrl
+      ? 'full_text_retrieved'
+      : baseItem.hasRealAbstract
+      ? 'abstract_and_metadata_retrieved'
+      : 'metadata_only_retrieved';
+  baseItem.accessStatus = baseItem.pdfUrl
+    ? 'open_access_pdf'
+    : baseItem.isOpenAccess
+    ? 'open_access_full_text'
+    : baseItem.hasRealAbstract
+    ? 'abstract_and_metadata'
+    : 'metadata_only';
+
+  return {
+    item: baseItem,
+    sourcesChecked,
+    enrichedFields,
+    retrievedAt,
+  };
+}
+
+

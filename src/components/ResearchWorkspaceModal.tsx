@@ -75,6 +75,7 @@ interface ResearchWorkspaceModalProps {
   onToggleBookmark: (id: string) => void;
   allDiscoveries?: DiscoveryItem[];
   onSelectDiscovery?: (item: DiscoveryItem) => void;
+  onUpdateDiscoveryItem?: (updatedItem: DiscoveryItem) => void;
   onFocusModeChange?: (isFocus: boolean) => void;
   onTriggerGlobalSearch?: (query: string) => void;
   onOpenRepoInExplorer?: (repoFullName: string) => void;
@@ -198,7 +199,7 @@ function getGroundedTermDefinition(
 }
 
 export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
-  item,
+  item: incomingItem,
   initialTab = 'reader',
   initialScrollTop = 0,
   initialReadingProgress = 15,
@@ -217,10 +218,16 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
   onToggleBookmark,
   allDiscoveries = [],
   onSelectDiscovery,
+  onUpdateDiscoveryItem,
   onFocusModeChange,
   onTriggerGlobalSearch,
   onOpenRepoInExplorer,
 }) => {
+  const [enrichedItem, setEnrichedItem] = useState<DiscoveryItem>(incomingItem);
+  const item = enrichedItem;
+  const [enrichmentStatus, setEnrichmentStatus] = useState<'idle' | 'loading' | 'enriched' | 'error'>('idle');
+  const [enrichmentSources, setEnrichmentSources] = useState<string[]>([]);
+  const [showEmbeddedPdf, setShowEmbeddedPdf] = useState<boolean>(false);
   const mapInitialMode = (
     tab: 'reader' | 'professor' | 'visual' | 'notes' | 'quiz'
   ): 'reader' | 'explain' | 'notes' => {
@@ -357,8 +364,47 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
     Math.max(0, Math.min(100, initialReadingProgress))
   );
 
-  // Sync if item changes while modal is open
+  // Sync if incomingItem changes while modal is open & trigger multi-source deep enrichment
+  const triggerDeepPaperEnrichment = async (targetPaper: DiscoveryItem) => {
+    setEnrichmentStatus('loading');
+    try {
+      const res = await fetch('/api/research/paper-detail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paperId: targetPaper.id,
+          canonicalId: targetPaper.canonicalId,
+          doi: targetPaper.doi,
+          arxivId: targetPaper.arxivId,
+          pmid: targetPaper.pmid,
+          pmcid: targetPaper.pmcid,
+          title: targetPaper.title,
+          existingItem: targetPaper,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.item && data.item.id === targetPaper.id) {
+          setEnrichedItem(data.item);
+          setEnrichmentSources(Array.isArray(data.sourcesChecked) ? data.sourcesChecked : []);
+          setEnrichmentStatus('enriched');
+          if (onUpdateDiscoveryItem) {
+            onUpdateDiscoveryItem(data.item);
+          }
+          return;
+        }
+      }
+      setEnrichmentStatus('idle');
+    } catch {
+      setEnrichmentStatus('error');
+    }
+  };
+
   useEffect(() => {
+    setEnrichedItem(incomingItem);
+    setShowEmbeddedPdf(false);
+    setEnrichmentStatus('idle');
+    setEnrichmentSources([]);
     savedReaderScrollTopRef.current = Math.max(0, initialScrollTop);
     savedReaderProgressRef.current = Math.max(0, Math.min(100, initialReadingProgress));
     setReadingProgress(savedReaderProgressRef.current);
@@ -369,12 +415,21 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
     setActiveFormulaInspectorId(null);
     setActiveFigureLightbox(null);
     try {
-      const raw = localStorage.getItem(`orbit_annotations_${item.id}`);
+      const raw = localStorage.getItem(`orbit_annotations_${incomingItem.id}`);
       setAnnotations(raw ? JSON.parse(raw) : []);
     } catch {
       setAnnotations([]);
     }
-  }, [item.id]);
+
+    if (
+      incomingItem.isLiveFetched ||
+      incomingItem.doi ||
+      incomingItem.arxivId ||
+      incomingItem.pmid
+    ) {
+      triggerDeepPaperEnrichment(incomingItem);
+    }
+  }, [incomingItem.id]);
 
   // Restore & synchronize scroll position and readingProgress when entering/returning to reader mode
   useEffect(() => {
@@ -936,6 +991,21 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
   // Quiz state
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, number>>({});
   const [quizSubmitted, setQuizSubmitted] = useState(false);
+
+  // Reset noteDraft and quiz state whenever the active paper ID changes or when enrichment completes on an unedited draft
+  useEffect(() => {
+    setNoteDraft(buildInitialDraft());
+    setIsEditingNote(false);
+    setAutosaveState(existingSavedNote ? 'saved' : 'idle');
+    setSelectedAnswers({});
+    setQuizSubmitted(false);
+  }, [incomingItem.id]);
+
+  useEffect(() => {
+    if (!existingSavedNote && !isEditingNote && enrichmentStatus === 'enriched') {
+      setNoteDraft(buildInitialDraft());
+    }
+  }, [enrichmentStatus, enrichedItem]);
 
   const updateNoteFieldWithAutosave = (updater: (prev: StructuredNote) => StructuredNote) => {
     setNoteDraft((prev) => {
@@ -2190,57 +2260,184 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                 </div>
 
                 {/* Provenance & Full-Text Availability Box */}
-                <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.025] border border-white/[0.08] flex flex-wrap items-center justify-between gap-4 text-xs">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`font-semibold ${
-                          hasOpenFullText ? 'text-emerald-300' : 'text-amber-200'
-                        }`}
-                      >
-                        {hasOpenFullText
-                          ? '● Full Text / Open-Access Manuscript Available'
-                          : '● Verified Abstract & Metadata (Full Text on Publisher Site)'}
-                      </span>
+                <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.025] border border-white/[0.08] space-y-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`font-semibold ${
+                            hasOpenFullText ? 'text-emerald-300' : 'text-amber-200'
+                          }`}
+                        >
+                          {item.accessStatus === 'open_access_pdf' || item.pdfUrl
+                            ? '● Open-Access PDF & Full Manuscript Available'
+                            : item.accessStatus === 'open_access_full_text' || hasOpenFullText
+                            ? '● Open-Access Full Text Available'
+                            : item.hasRealAbstract !== false
+                            ? '● Verified Author Abstract & Metadata (Full Text on Publisher Site)'
+                            : '● Bibliographic Metadata Record (Full Text on Publisher Site)'}
+                        </span>
+                        {enrichmentStatus === 'loading' && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-mono text-emerald-300">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Enriching from Semantic Scholar, arXiv &amp; Europe PMC...</span>
+                          </span>
+                        )}
+                        {enrichmentStatus === 'enriched' && enrichmentSources.length > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[11px] font-mono text-emerald-300">
+                            <Check className="w-3 h-3" />
+                            <span>Verified via {enrichmentSources.join(' · ')}</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-white/55 font-mono text-[11px] flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>Canonical ID: {item.canonicalId}</span>
+                        {item.doi && <span>DOI: {item.doi}</span>}
+                        {item.arxivId && <span>arXiv: {item.arxivId}</span>}
+                        {item.pmid && <span>PMID: {item.pmid}</span>}
+                        {item.pmcid && <span>PMCID: {item.pmcid}</span>}
+                      </div>
                     </div>
-                    <div className="text-white/55 font-mono text-[11px]">
-                      Canonical ID: {item.canonicalId} · Select any passage to highlight, attach notes, or quote.
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {(item.pdfUrl || item.sourceType === 'Preprint (arXiv / bioRxiv)') && (
+                        <button
+                          type="button"
+                          onClick={() => setShowEmbeddedPdf((prev) => !prev)}
+                          className={`px-3.5 py-2 rounded-full font-semibold transition-colors inline-flex items-center gap-1.5 ${
+                            showEmbeddedPdf
+                              ? 'bg-emerald-400 text-[#0B0A0E]'
+                              : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/35 text-emerald-200'
+                          }`}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>{showEmbeddedPdf ? 'Hide Embedded PDF' : 'Read Embedded PDF'}</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => triggerDeepPaperEnrichment(item)}
+                        disabled={enrichmentStatus === 'loading'}
+                        className="px-3 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 text-[11px] font-mono text-white/80 hover:text-white inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+                        title="Query Semantic Scholar, arXiv, Europe PMC Full-Text XML, and Hugging Face Papers for deep metadata"
+                      >
+                        <RefreshCw
+                          className={`w-3 h-3 text-emerald-300 ${
+                            enrichmentStatus === 'loading' ? 'animate-spin' : ''
+                          }`}
+                        />
+                        <span>{enrichmentStatus === 'loading' ? 'Enriching...' : 'Verify / Enrich'}</span>
+                      </button>
+
+                      {item.providerLinks &&
+                        item.providerLinks.length > 1 &&
+                        item.providerLinks.map((pl, idx) => (
+                          <a
+                            key={idx}
+                            href={pl.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-2.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.14] border border-white/10 text-[11px] font-mono text-emerald-300 inline-flex items-center gap-1 transition-colors"
+                            title={`Verified record on ${pl.providerName}`}
+                          >
+                            <span>{pl.providerName}</span>
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        ))}
+                      <a
+                        href={item.pdfUrl || item.fullTextUrl || item.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3.5 py-2 rounded-full bg-white text-[#0B0A0E] font-semibold hover:bg-white/90 transition-colors inline-flex items-center gap-1.5 shadow-sm"
+                      >
+                        <span>
+                          {item.pdfUrl || item.sourceType === 'Preprint (arXiv / bioRxiv)'
+                            ? 'Open PDF / Preprint'
+                            : item.sourceType === 'GitHub Repository'
+                            ? 'Open GitHub Repository'
+                            : 'Open Publisher / DOI Page'}
+                        </span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
                     </div>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    {item.providerLinks &&
-                      item.providerLinks.length > 1 &&
-                      item.providerLinks.map((pl, idx) => (
+                  {/* Associated GitHub Repositories Banner when available */}
+                  {item.associatedRepos && item.associatedRepos.length > 0 && (
+                    <div className="pt-2.5 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-mono text-emerald-300">
+                        Companion &amp; Related Code Repositories ({item.associatedRepos.length}):
+                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {item.associatedRepos.map((repo, rIdx) => (
+                          <div
+                            key={rIdx}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-black/40 border border-white/15 text-[11px]"
+                          >
+                            <span className="font-mono font-semibold text-white">{repo.fullName}</span>
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                repo.matchConfidence === 'high_verified' ||
+                                repo.provenance === 'Papers with Code / HF Verified'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : 'bg-white/10 text-white/65'
+                              }`}
+                            >
+                              {repo.matchConfidence === 'high_verified' ||
+                              repo.provenance === 'Papers with Code / HF Verified'
+                                ? 'Verified Paper Repo'
+                                : 'Topic Match'}
+                            </span>
+                            {onOpenRepoInExplorer && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenRepoInExplorer(repo.fullName)}
+                                className="text-emerald-300 hover:underline font-mono ml-1"
+                              >
+                                Inspect Code →
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Embedded PDF / Manuscript Reader Panel */}
+                {showEmbeddedPdf && (item.pdfUrl || item.fullTextUrl) && (
+                  <div className="rounded-2xl overflow-hidden border border-emerald-500/35 bg-[#0D0C12] space-y-2 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-2 py-1 text-xs">
+                      <span className="font-mono text-emerald-300">
+                        Direct Manuscript PDF Stream · {item.pdfUrl || item.fullTextUrl}
+                      </span>
+                      <div className="flex items-center gap-3">
                         <a
-                          key={idx}
-                          href={pl.url}
+                          href={item.pdfUrl || item.fullTextUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="px-2.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.14] border border-white/10 text-[11px] font-mono text-emerald-300 inline-flex items-center gap-1 transition-colors"
-                          title={`Verified record on ${pl.providerName}`}
+                          className="text-white/80 hover:text-white underline inline-flex items-center gap-1"
                         >
-                          <span>{pl.providerName}</span>
-                          <ExternalLink className="w-2.5 h-2.5" />
+                          <span>Open Fullscreen PDF in New Tab</span>
+                          <ExternalLink className="w-3 h-3" />
                         </a>
-                      ))}
-                    <a
-                      href={item.fullTextUrl || item.sourceUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3.5 py-2 rounded-full bg-white text-[#0B0A0E] font-semibold hover:bg-white/90 transition-colors inline-flex items-center gap-1.5 shadow-sm"
-                    >
-                      <span>
-                        {item.sourceType === 'Preprint (arXiv / bioRxiv)'
-                          ? 'Open Preprint / PDF'
-                          : item.sourceType === 'GitHub Repository'
-                          ? 'Open GitHub Repository'
-                          : 'Open Publisher / DOI Page'}
-                      </span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                        <button
+                          type="button"
+                          onClick={() => setShowEmbeddedPdf(false)}
+                          className="text-white/60 hover:text-white"
+                        >
+                          Close PDF
+                        </button>
+                      </div>
+                    </div>
+                    <iframe
+                      src={item.pdfUrl || item.fullTextUrl}
+                      title={`PDF Viewer for ${item.title}`}
+                      className="w-full h-[640px] rounded-xl bg-white"
+                    />
                   </div>
-                </div>
+                )}
               </header>
 
               {/* SECTION 1: ABSTRACT & OVERVIEW */}
@@ -2273,6 +2470,18 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                   </div>
                 </div>
 
+                {/* SciTLDR Summary when available from Semantic Scholar */}
+                {item.tldrSummary && (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10 space-y-1.5">
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-emerald-300">
+                      Semantic Scholar SciTLDR · Concise Paper Summary
+                    </div>
+                    <p className="text-sm sm:text-base text-white/90 leading-relaxed">
+                      <LatexTextRenderer text={item.tldrSummary} />
+                    </p>
+                  </div>
+                )}
+
                 <div className={getReaderParagraphClasses()}>
                   <LatexTextRenderer text={item.readerLayers.quickOrientation} />
                 </div>
@@ -2299,9 +2508,113 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                     </button>
                   </div>
                   <p className="text-sm sm:text-base text-white/95 leading-relaxed font-medium">
-                    {item.oneSentenceWhyItMatters}
+                    <LatexTextRenderer text={item.oneSentenceWhyItMatters} />
                   </p>
                 </div>
+
+                {/* Full-Text XML / Structured Manuscript Sections when available */}
+                {item.structuredSections && item.structuredSections.length > 0 && (
+                  <div className="space-y-4 pt-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono uppercase tracking-wider text-emerald-300">
+                        {item.structuredSections.some((s) => s.sourceBasis === 'full_text')
+                          ? 'Extracted Open-Access Full-Text Manuscript Sections'
+                          : 'Structured Paper Breakdown'}
+                      </span>
+                      <span className="text-[11px] font-mono text-white/45">
+                        {item.structuredSections.some((s) => s.sourceBasis === 'full_text')
+                          ? 'Source: Europe PMC JATS XML'
+                          : 'Source: Author Abstract Decomposition'}
+                      </span>
+                    </div>
+                    <div className="space-y-4">
+                      {item.structuredSections.map((sec) => (
+                        <div
+                          key={sec.id}
+                          className="p-5 rounded-2xl bg-white/[0.02] border border-white/[0.08] space-y-2.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-base font-bold text-white">{sec.heading}</h3>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-white/5 text-white/55">
+                              {sec.sourceBasis === 'full_text' ? 'Full-Text XML' : 'Structured Abstract'}
+                            </span>
+                          </div>
+                          <div className={`${getReaderParagraphClasses()} whitespace-pre-line`}>
+                            <LatexTextRenderer text={sec.content} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Extracted Manuscript Figures & Captions when available */}
+                {item.figures && item.figures.length > 0 && (
+                  <div className="space-y-3 pt-3">
+                    <div className="text-xs font-mono uppercase tracking-wider text-emerald-300">
+                      Manuscript Figures &amp; Captions ({item.figures.length})
+                    </div>
+                    <div className="grid grid-cols-1 gap-3">
+                      {item.figures.map((fig) => (
+                        <div
+                          key={fig.id}
+                          className="p-4 rounded-2xl bg-black/40 border border-white/10 space-y-1.5 text-xs sm:text-sm"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-bold text-emerald-300">{fig.label}</span>
+                            {fig.sourceNote && (
+                              <span className="text-[11px] font-mono text-white/45">{fig.sourceNote}</span>
+                            )}
+                          </div>
+                          <p className="text-white/85 leading-relaxed">
+                            <LatexTextRenderer text={fig.caption} />
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Extracted Manuscript Data Tables when available */}
+                {item.tables && item.tables.length > 0 && (
+                  <div className="space-y-3 pt-3">
+                    <div className="text-xs font-mono uppercase tracking-wider text-emerald-300">
+                      Manuscript Tables ({item.tables.length})
+                    </div>
+                    {item.tables.map((tbl) => (
+                      <div
+                        key={tbl.id}
+                        className="rounded-2xl border border-white/12 overflow-hidden bg-black/30 space-y-2 p-4"
+                      >
+                        <div className="text-xs font-semibold text-white/90">{tbl.caption}</div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="border-b border-white/15 bg-white/[0.04] text-emerald-300 font-mono">
+                                {tbl.headers.map((h, hIdx) => (
+                                  <th key={hIdx} className="py-2 px-3">
+                                    {h}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/10">
+                              {tbl.rows.map((row, rIdx) => (
+                                <tr key={rIdx}>
+                                  {row.map((cell, cIdx) => (
+                                    <td key={cIdx} className="py-2 px-3 text-white/80">
+                                      {cell}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </section>
 
               {/* SECTION 2: BACKGROUND & PREREQUISITES */}

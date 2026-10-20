@@ -473,7 +473,7 @@ export const CitationNetworkGraph: React.FC<CitationNetworkGraphProps> = ({
       .call(zoomBehaviorRef.current.transform, d3.zoomIdentity);
   };
 
-  // Convert a CitationNetworkNode into a full DiscoveryItem so user can read & study it in the modal
+  // Convert a CitationNetworkNode into an independent DiscoveryItem so user can read & study it in the modal
   const openNodeInWorkspace = (node: CitationNetworkNode) => {
     if (!onSelectDiscovery) return;
     const existing = allDiscoveries.find(
@@ -487,25 +487,28 @@ export const CitationNetworkGraph: React.FC<CitationNetworkGraphProps> = ({
       return;
     }
 
-    const abs =
-      node.abstractText && node.abstractText.length > 25
-        ? node.abstractText
-        : `Connected research work (${
-            node.relationType === 'cites_current'
-              ? 'cites current paper'
-              : node.relationType === 'referenced_by_current'
-              ? 'referenced by current paper'
-              : 'related research'
-          }) in ${item.domain}. Published in ${node.venue} (${node.year}).`;
+    const hasRealAbstract = Boolean(node.abstractText && node.abstractText.trim().length > 25);
+    const abs = hasRealAbstract
+      ? node.abstractText!.trim()
+      : `Bibliographic citation record retrieved via ${node.providerName}. Published in ${node.venue} (${node.year}) by ${
+          node.authors.slice(0, 4).join(', ') || 'listed authors'
+        }.`;
+
+    const nodeDoi = node.canonicalId.startsWith('doi:') ? node.canonicalId.slice(4) : undefined;
+    const nodeArxiv = node.canonicalId.startsWith('arxiv:') ? node.canonicalId.slice(6) : undefined;
 
     const synthesized: DiscoveryItem = {
       id: `cit-${node.id.replace(/[^a-zA-Z0-9_-]/g, '')}`,
       canonicalId: node.canonicalId || `cit:${node.id}`,
       title: node.title,
-      shortSubtitle: `${node.venue} (${node.year}) · ${node.providerName}`,
-      oneSentenceWhyItMatters: `Part of the direct scholarly citation network surrounding "${item.title}" (${node.citationCount.toLocaleString()} citations).`,
+      shortSubtitle: `${node.venue} · ${node.year}${
+        node.citationCount > 0 ? ` · ${node.citationCount.toLocaleString()} citations` : ''
+      }`,
+      oneSentenceWhyItMatters: hasRealAbstract
+        ? abs.split(/(?<=[.!?])\s+/)[0].slice(0, 220)
+        : `Scholarly work published in ${node.venue} (${node.year}) with ${node.citationCount.toLocaleString()} recorded citations.`,
       domain: item.domain,
-      sourceName: node.sourceName || node.venue,
+      sourceName: node.venue || node.sourceName,
       sourceType:
         node.evidenceStatus === 'Preprint / Not Yet Peer-Reviewed'
           ? 'Preprint (arXiv / bioRxiv)'
@@ -515,8 +518,28 @@ export const CitationNetworkGraph: React.FC<CitationNetworkGraphProps> = ({
       retrievedAt: new Date().toISOString(),
       sourceUrl: node.sourceUrl,
       fullTextUrl: node.pdfUrl || node.sourceUrl,
+      pdfUrl: node.pdfUrl,
+      isOpenAccess: node.isOpenAccess,
       fullTextAvailable: Boolean(node.pdfUrl || node.isOpenAccess),
-      authors: node.authors.length > 0 ? node.authors : ['Listed on Source Record'],
+      hasRealAbstract,
+      abstractText: hasRealAbstract ? abs : undefined,
+      retrievalStatus: node.pdfUrl
+        ? 'full_text_retrieved'
+        : hasRealAbstract
+        ? 'abstract_and_metadata_retrieved'
+        : 'metadata_only_retrieved',
+      accessStatus: node.pdfUrl
+        ? 'open_access_pdf'
+        : node.isOpenAccess
+        ? 'open_access_full_text'
+        : hasRealAbstract
+        ? 'abstract_and_metadata'
+        : 'metadata_only',
+      doi: nodeDoi,
+      arxivId: nodeArxiv,
+      venue: node.venue,
+      publicationYear: Number(node.year) || undefined,
+      authors: node.authors.length > 0 ? node.authors : ['Authors listed on primary source record'],
       artworkTheme: item.artworkTheme,
       visualSandboxId: item.visualSandboxId,
       isLiveFetched: true,
@@ -529,31 +552,34 @@ export const CitationNetworkGraph: React.FC<CitationNetworkGraphProps> = ({
             ? 'High (Empirical / Replicated)'
             : 'Moderate (Preprint / Primary Code)',
         momentum: `${node.citationCount.toLocaleString()} citations recorded`,
-        novelty: `Connected via ${node.relationType.replace(/_/g, ' ')}`,
-        learningValue: `Deepens context on ${item.domain}`,
+        novelty: `Indexed in ${node.providerName}`,
+        learningValue: hasRealAbstract ? 'Verified Author Abstract & Metadata' : 'Bibliographic Citation Record',
       },
       readerLayers: {
         quickOrientation: abs,
-        sourceAndStatus: `${node.sourceName} (${node.publishedAt}). ${
-          node.isOpenAccess ? 'Open-Access full text available.' : 'Abstract & bibliographic record.'
-        }`,
-        beginnerExplanation: abs,
+        sourceAndStatus: `Retrieved from ${node.providerName} (${node.venue}, ${node.publishedAt || node.year}). Canonical ID: ${node.canonicalId}.`,
+        beginnerExplanation: hasRealAbstract
+          ? `In "${node.title}" (${node.venue}, ${node.year}), ${node.authors.slice(0, 3).join(', ') || 'the authors'} report: ${abs}`
+          : `This scholarly work ("${node.title}") was published in ${node.venue} (${node.year}). Full enrichment is loading from primary scholarly indices.`,
         beginnerExplanationHinglish: abs,
-        prerequisites: item.readerLayers.prerequisites,
-        historicalFoundations: `Connected in the scholarly lineage of "${item.title}".`,
+        prerequisites: [item.domain, node.venue].filter(Boolean),
+        historicalFoundations: `Published in ${node.venue} (${node.year}) by ${node.authors.slice(0, 5).join(', ') || 'listed authors'}. Connected in the scholarly citation graph to "${item.title}".`,
         coreMechanism: [
-          `Investigates core research questions in ${item.domain} (${node.venue}, ${node.year}).`,
-          abs,
+          hasRealAbstract
+            ? abs
+            : `Primary bibliographic record verified via ${node.providerName} (${node.canonicalId}).`,
         ],
         coreMechanismHinglish: [abs],
-        methodsAndEvidence: `Published in ${node.venue} (${node.year}). Citations: ${node.citationCount.toLocaleString()}.`,
-        findings: abs,
+        methodsAndEvidence: `Publication Venue: ${node.venue} (${node.year}) · Citations: ${node.citationCount.toLocaleString()} · Source: ${node.providerName}.`,
+        findings: hasRealAbstract
+          ? abs
+          : 'Inspect the primary publisher link or wait for automatic multi-source abstract enrichment.',
         limitationsAndUncertainty:
-          'Inspect the primary publisher or open-access PDF for complete experimental appendices.',
-        applicationsAndImplications: item.readerLayers.applicationsAndImplications,
-        criticalAnalysisAndFalsifiability: item.readerLayers.criticalAnalysisAndFalsifiability,
-        relatedWork: [item.title],
-        whatToWatchNext: item.readerLayers.whatToWatchNext,
+          'Verify complete experimental appendices, boundary conditions, and sample sizes in the primary publication.',
+        applicationsAndImplications: `Advances scholarly research in ${item.domain} (${node.venue}, ${node.year}).`,
+        criticalAnalysisAndFalsifiability: `Evaluate empirical reproducibility and baseline comparisons reported in "${node.title}".`,
+        relatedWork: [`${item.title} (${item.sourceName}, ${item.publishedAt.slice(0, 4)})`],
+        whatToWatchNext: `Track subsequent works citing "${node.title}" (${node.citationCount.toLocaleString()} citations recorded).`,
         references: [
           {
             id: `back-${item.id}`,
@@ -567,8 +593,22 @@ export const CitationNetworkGraph: React.FC<CitationNetworkGraphProps> = ({
           },
         ],
       },
-      equations: item.equations.slice(0, 1),
-      quiz: item.quiz,
+      equations: [],
+      quiz: [
+        {
+          id: `q-${node.id}-1`,
+          question: `What is the primary publication status and venue of "${node.title.slice(0, 75)}"?`,
+          options: [
+            `Published in ${node.venue} (${node.year}) as a ${node.evidenceStatus.toLowerCase()} record`,
+            'An unindexed internal draft without bibliographic metadata',
+            'A commercial patent filing without scholarly citations',
+            'A deprecated software specification',
+          ],
+          correctIndex: 0,
+          explanationWhyRight: `"${node.title}" is indexed via ${node.providerName} in ${node.venue} (${node.year}).`,
+          misconceptionDiagnosed: 'Always verify publication venue, peer-review status, and citation provenance.',
+        },
+      ],
     };
 
     onSelectDiscovery(synthesized);

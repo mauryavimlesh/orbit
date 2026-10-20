@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   DiscoveryItem,
   GitHubRepoAnalysis,
@@ -99,11 +99,13 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
   const [repos, setRepos] = useState<GitHubCatalogRepoItem[]>(SEED_GITHUB_REPOS);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState<number>(SEED_GITHUB_REPOS.length);
   const [isRateLimited, setIsRateLimited] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [lastFetchedLabel, setLastFetchedLabel] = useState<string | null>(null);
+  const [showFiltersPopover, setShowFiltersPopover] = useState(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
   // Repository Detail Modal / Inspection state
   const [detailModalOpen, setDetailModalOpen] = useState(false);
@@ -156,7 +158,10 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
     const isAppend = opts.append === true;
 
     const presetObj = GITHUB_TOPIC_PRESETS.find((t) => t.id === topicId);
-    const effectiveQuery = q.trim() || presetObj?.query || '';
+    const effectiveQuery =
+      q.trim() ||
+      presetObj?.query ||
+      (pageNum > 1 ? 'machine-learning OR deep-learning OR scientific-computing' : '');
 
     // If default "all" with no query and language "All" on page 1, show verified seeds first
     if (!effectiveQuery && language === 'All' && topicId === 'all' && pageNum === 1) {
@@ -167,7 +172,7 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
       );
       setRepos(sortedSeeds);
       setTotalCount(sortedSeeds.length);
-      setHasMore(false);
+      setHasMore(true);
       setApiError(null);
       setIsRateLimited(false);
       setLastFetchedLabel(null);
@@ -382,9 +387,39 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
   };
 
   const handleLoadMore = () => {
+    if (isLoading || isLoadingMore || !hasMore) return;
     const nextPage = page + 1;
     setPage(nextPage);
     fetchRepositories({ pageNumber: nextPage, append: true });
+  };
+
+  useEffect(() => {
+    const el = loadMoreSentinelRef.current;
+    if (!el || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && !isLoading && !isLoadingMore && hasMore) {
+          handleLoadMore();
+        }
+      },
+      { rootMargin: '260px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, isLoading, isLoadingMore, page, searchQuery, selectedTopicId, selectedLanguage, sortBy]);
+
+  const activeFilterCount =
+    (selectedTopicId !== 'all' ? 1 : 0) +
+    (selectedLanguage !== 'All' ? 1 : 0) +
+    (sortBy !== 'stars' ? 1 : 0);
+
+  const resetRepoFilters = () => {
+    setSearchQuery('');
+    setSelectedTopicId('all');
+    setSelectedLanguage('All');
+    setSortBy('stars');
+    setPage(1);
+    fetchRepositories({ q: '', topicId: 'all', language: 'All', sort: 'stars', pageNumber: 1, append: false });
   };
 
   const handleCompareIdea = async (e: React.FormEvent) => {
@@ -409,150 +444,101 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* HERO HEADER */}
-      <div className="relative rounded-[28px] overflow-hidden border border-white/12 p-6 sm:p-8 shadow-2xl">
+    <div className="space-y-4">
+      {/* COMPACT HERO HEADER */}
+      <div className="relative rounded-[24px] overflow-hidden border border-white/12 p-4 sm:p-6 shadow-xl">
         <EditorialArtwork
           theme="geospatial_splatting"
           variant="hero"
-          className="absolute inset-0 w-full h-full opacity-45"
+          className="absolute inset-0 w-full h-full opacity-40"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#09080E]/95 via-[#09080E]/85 to-[#09080E]/60" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#09080E]/95 via-[#09080E]/85 to-[#09080E]/65" />
 
-        <div className="relative z-10 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="space-y-1.5 max-w-3xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-500/30 text-xs font-mono text-sky-300">
-                <GitBranch className="w-3.5 h-3.5" />
-                <span>GitHub Repositories Explorer · Real Code &amp; Research Artifacts</span>
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-white">
-                Explore Open-Source Research Repositories &amp; Implementations
-              </h1>
-              <p className="text-xs sm:text-sm text-white/70 leading-relaxed">
-                Discover real code implementations linked to research papers, inspect live READMEs and language breakdowns, audit dependencies, or have Professor explain complex architectures.
-              </p>
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-4">
+          <div className="space-y-1 max-w-3xl">
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-[11px] font-mono text-sky-300">
+              <GitBranch className="w-3 h-3" />
+              <span>GitHub Repositories Explorer · Real Code &amp; Research Artifacts</span>
             </div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+              Open-Source Research Repositories &amp; Implementations
+            </h1>
+            <p className="text-xs sm:text-sm text-white/70 leading-relaxed">
+              Inspect live READMEs, language breakdowns, and code implementations linked to scientific papers.
+            </p>
+          </div>
 
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <span className="px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-white/80 font-mono text-xs">
+              ● {totalCount.toLocaleString()} Repos
+            </span>
             {onBackToDiscover && (
               <button
                 type="button"
                 onClick={onBackToDiscover}
-                className="px-4 py-2 rounded-full orbit-glass-pill hover:bg-white/20 text-xs font-semibold text-white inline-flex items-center gap-1.5 transition-colors shrink-0"
+                className="px-3.5 py-1.5 rounded-full orbit-glass-pill hover:bg-white/20 text-xs font-semibold text-white inline-flex items-center gap-1.5 transition-colors"
               >
                 <ArrowLeft className="w-3.5 h-3.5" />
-                <span>Back to Research Papers</span>
+                <span>Research Papers</span>
               </button>
-            )}
-          </div>
-
-          {/* Quick Stats & Rate-Limit Notice */}
-          <div className="flex flex-wrap items-center gap-3 pt-2 text-xs">
-            <span className="px-3 py-1 rounded-full bg-white/[0.06] border border-white/10 text-white/80 font-mono">
-              ● {totalCount.toLocaleString()} Repositories Available
-            </span>
-            {isRateLimited && (
-              <span className="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-200 inline-flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-300" />
-                <span>GitHub unauthenticated rate limit reached (60/hr). Showing verified research records.</span>
-              </span>
-            )}
-            {lastFetchedLabel && !isRateLimited && (
-              <span className="text-white/55 font-mono text-[11px]">
-                {lastFetchedLabel}
-              </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* EXPLORER SEARCH & FILTER BAR */}
-      <div className="orbit-glass-panel rounded-[28px] p-5 sm:p-6 space-y-4 border border-white/12">
-        <form onSubmit={handleSearchSubmit} className="flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-white/50 absolute left-4 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search repositories by topic or enter owner/repo (e.g., 'Dao-AILab/flash-attention', 'gaussian splatting', 'qwen')..."
-              className="w-full pl-11 pr-4 py-3 rounded-2xl bg-black/45 border border-white/15 text-xs sm:text-sm text-white placeholder:text-white/45 focus:outline-none focus:border-white/40"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="px-6 py-3 rounded-2xl bg-white text-[#0B0A0E] text-xs sm:text-sm font-bold hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-2 whitespace-nowrap shrink-0 shadow-md disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span>{isLoading ? 'Searching Repos...' : 'Search Repositories'}</span>
-          </button>
-        </form>
-
-        {/* Filter Controls: Language & Sort Toggle */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          {/* Language Chips */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full no-scrollbar text-xs">
-            <span className="text-white/50 font-medium shrink-0 mr-1">Language:</span>
-            {LANGUAGE_FILTERS.map((lang) => (
-              <button
-                key={lang}
-                type="button"
-                onClick={() => {
-                  setSelectedLanguage(lang);
-                  setPage(1);
-                  fetchRepositories({ language: lang, pageNumber: 1, append: false });
-                }}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors shrink-0 ${
-                  selectedLanguage === lang
-                    ? 'bg-sky-400 text-[#0B0A0E] font-bold shadow-sm'
-                    : 'bg-white/5 hover:bg-white/15 text-white/75 hover:text-white border border-white/10'
-                }`}
-              >
-                {lang}
-              </button>
-            ))}
-          </div>
-
-          {/* Sort & Idea Comparator Toggle */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="inline-flex items-center rounded-full bg-black/45 border border-white/12 p-1 text-xs">
-              <button
-                type="button"
-                onClick={() => {
-                  setSortBy('stars');
-                  setPage(1);
-                  fetchRepositories({ sort: 'stars', pageNumber: 1, append: false });
-                }}
-                className={`px-3 py-1 rounded-full transition-colors ${
-                  sortBy === 'stars'
-                    ? 'bg-white text-[#0B0A0E] font-semibold'
-                    : 'text-white/65 hover:text-white'
-                }`}
-              >
-                Most Stars
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSortBy('updated');
-                  setPage(1);
-                  fetchRepositories({ sort: 'updated', pageNumber: 1, append: false });
-                }}
-                className={`px-3 py-1 rounded-full transition-colors ${
-                  sortBy === 'updated'
-                    ? 'bg-white text-[#0B0A0E] font-semibold'
-                    : 'text-white/65 hover:text-white'
-                }`}
-              >
-                Recently Updated
-              </button>
+      {/* COMPACT EXPLORER SEARCH & FILTER BAR */}
+      <div className="orbit-glass-panel rounded-[24px] p-4 sm:p-5 space-y-3 border border-white/12 relative">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2.5">
+          <form onSubmit={handleSearchSubmit} className="flex-1 flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-white/50 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search repositories by topic or enter owner/repo (e.g., 'Dao-AILab/flash-attention', 'gaussian splatting')..."
+                className="w-full pl-10 pr-4 py-2.5 rounded-2xl bg-black/45 border border-white/15 text-xs sm:text-sm text-white placeholder:text-white/45 focus:outline-none focus:border-white/40"
+              />
             </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="px-4 sm:px-5 py-2.5 rounded-2xl bg-white text-[#0B0A0E] text-xs font-bold hover:bg-white/90 transition-colors inline-flex items-center justify-center gap-1.5 whitespace-nowrap shrink-0 shadow-sm disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <span>{isLoading ? 'Searching...' : 'Search'}</span>
+            </button>
+          </form>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowFiltersPopover((prev) => !prev)}
+              className={`px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition-all inline-flex items-center gap-2 border ${
+                showFiltersPopover || activeFilterCount > 0
+                  ? 'bg-white text-[#0B0A0E] border-white shadow-sm'
+                  : 'orbit-glass-pill text-white border-white/15 hover:bg-white/15'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>Filters &amp; Sort</span>
+              {activeFilterCount > 0 && (
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                    showFiltersPopover || activeFilterCount > 0
+                      ? 'bg-[#0B0A0E] text-sky-300'
+                      : 'bg-sky-500/20 text-sky-200'
+                  }`}
+                >
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
               onClick={() => setShowIdeaComparator((prev) => !prev)}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors inline-flex items-center gap-1.5 ${
+              className={`px-3.5 py-2.5 rounded-2xl text-xs font-medium transition-colors inline-flex items-center gap-1.5 ${
                 showIdeaComparator
                   ? 'bg-purple-500/25 border border-purple-400 text-purple-200'
                   : 'orbit-glass-pill text-white/80 hover:text-white'
@@ -564,29 +550,215 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
           </div>
         </div>
 
-        {/* Topic Presets Bar */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs border-t border-white/[0.08] pt-3">
-          <span className="text-white/50 font-medium shrink-0 mr-1">Topics:</span>
-          {GITHUB_TOPIC_PRESETS.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => {
-                setSelectedTopicId(t.id);
-                setSearchQuery('');
-                setPage(1);
-                fetchRepositories({ topicId: t.id, q: '', pageNumber: 1, append: false });
-              }}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors shrink-0 ${
-                selectedTopicId === t.id
-                  ? 'bg-white text-[#0B0A0E] font-bold shadow-sm'
-                  : 'orbit-glass-pill text-white/70 hover:text-white'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {/* Active Filter Removable Chips (shown only when useful) */}
+        {(activeFilterCount > 0 || Boolean(searchQuery.trim()) || isRateLimited) && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-[11px] font-mono text-white/45 mr-1">Active:</span>
+            {searchQuery.trim() && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] text-white">
+                <span>Query: &ldquo;{searchQuery.trim()}&rdquo;</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery('');
+                    setPage(1);
+                    fetchRepositories({ q: '', pageNumber: 1, append: false });
+                  }}
+                  className="hover:text-rose-300"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {selectedTopicId !== 'all' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-sky-500/15 border border-sky-500/30 text-[11px] text-sky-200">
+                <span>
+                  Topic: {GITHUB_TOPIC_PRESETS.find((t) => t.id === selectedTopicId)?.label}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTopicId('all');
+                    setPage(1);
+                    fetchRepositories({ topicId: 'all', pageNumber: 1, append: false });
+                  }}
+                  className="hover:text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {selectedLanguage !== 'All' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[11px] text-emerald-200">
+                <span>Language: {selectedLanguage}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedLanguage('All');
+                    setPage(1);
+                    fetchRepositories({ language: 'All', pageNumber: 1, append: false });
+                  }}
+                  className="hover:text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {sortBy !== 'stars' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 border border-white/15 text-[11px] text-white/85">
+                <span>Sort: Recently Updated</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSortBy('stars');
+                    setPage(1);
+                    fetchRepositories({ sort: 'stars', pageNumber: 1, append: false });
+                  }}
+                  className="hover:text-white"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            )}
+            {(activeFilterCount > 0 || Boolean(searchQuery.trim())) && (
+              <button
+                type="button"
+                onClick={resetRepoFilters}
+                className="px-2.5 py-1 rounded-full text-[11px] font-mono text-rose-300 hover:bg-rose-500/15 transition-colors"
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* COMPACT FILTERS & SORT POPOVER / MOBILE BOTTOM SHEET */}
+        {showFiltersPopover && (
+          <div className="fixed inset-x-0 bottom-0 z-50 sm:static sm:inset-auto sm:z-30 bg-[#12101B] sm:bg-black/75 border-t sm:border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 sm:p-5 space-y-4 shadow-2xl backdrop-blur-xl max-h-[82vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4 text-sky-300" />
+                <span className="text-xs sm:text-sm font-bold text-white">
+                  Repository Filters &amp; Sort
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {activeFilterCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={resetRepoFilters}
+                    className="px-2.5 py-1 rounded-full text-[11px] text-rose-300 hover:bg-rose-500/15"
+                  >
+                    Reset all
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowFiltersPopover(false)}
+                  className="px-3 py-1 rounded-full bg-sky-400 text-[#0B0A0E] text-xs font-bold hover:bg-sky-300"
+                >
+                  Apply &amp; Done
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Group 1: Topic Preset */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-white/55 block">
+                  Research Code Topic
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {GITHUB_TOPIC_PRESETS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTopicId(t.id);
+                        setSearchQuery('');
+                        setPage(1);
+                        fetchRepositories({ topicId: t.id, q: '', pageNumber: 1, append: false });
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        selectedTopicId === t.id
+                          ? 'bg-white text-[#0B0A0E] font-bold'
+                          : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Group 2: Programming Language */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-white/55 block">
+                  Programming Language
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {LANGUAGE_FILTERS.map((lang) => (
+                    <button
+                      key={lang}
+                      type="button"
+                      onClick={() => {
+                        setSelectedLanguage(lang);
+                        setPage(1);
+                        fetchRepositories({ language: lang, pageNumber: 1, append: false });
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        selectedLanguage === lang
+                          ? 'bg-sky-400 text-[#0B0A0E] font-bold'
+                          : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                      }`}
+                    >
+                      {lang}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Group 3: Sort Order */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-mono uppercase tracking-wider text-white/55 block">
+                  Sort Repositories By
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSortBy('stars');
+                      setPage(1);
+                      fetchRepositories({ sort: 'stars', pageNumber: 1, append: false });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      sortBy === 'stars'
+                        ? 'bg-white text-[#0B0A0E] font-bold'
+                        : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                    }`}
+                  >
+                    Most Stars
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSortBy('updated');
+                      setPage(1);
+                      fetchRepositories({ sort: 'updated', pageNumber: 1, append: false });
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      sortBy === 'updated'
+                        ? 'bg-white text-[#0B0A0E] font-bold'
+                        : 'bg-white/[0.05] text-white/75 hover:text-white border border-white/10'
+                    }`}
+                  >
+                    Recently Updated
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* IDEA COMPARATOR DRAWER (Collapsible) */}
@@ -855,20 +1027,31 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
             })}
           </div>
 
-          {/* Incremental Load More Action */}
-          {hasMore && (
-            <div className="text-center pt-4">
+          {/* Continuous Repository Loading Sentinel & Incremental Load More Action */}
+          <div
+            ref={loadMoreSentinelRef}
+            className="text-center pt-3 pb-1 flex flex-col items-center justify-center gap-2"
+          >
+            {hasMore ? (
               <button
                 type="button"
                 disabled={isLoadingMore}
                 onClick={handleLoadMore}
-                className="px-6 py-3 rounded-full orbit-glass-pill text-xs font-bold text-white hover:bg-white/20 transition-all inline-flex items-center gap-2 shadow-lg disabled:opacity-50"
+                className="px-6 py-2.5 rounded-full orbit-glass-pill text-xs font-bold text-white hover:bg-white/20 transition-all inline-flex items-center gap-2 shadow-lg disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoadingMore ? 'animate-spin' : ''}`} />
-                <span>{isLoadingMore ? 'Loading More Repositories...' : 'Load More Repositories'}</span>
+                <span>
+                  {isLoadingMore
+                    ? `Loading Page ${page + 1} from GitHub...`
+                    : `Load More Repositories (Page ${page + 1} · or scroll to auto-load)`}
+                </span>
               </button>
-            </div>
-          )}
+            ) : (
+              <span className="text-[11px] font-mono text-white/45 py-1">
+                All matching repositories loaded ({repos.length} unique repositories).
+              </span>
+            )}
+          </div>
         </div>
       )}
 
