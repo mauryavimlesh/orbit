@@ -1542,6 +1542,20 @@ export interface ResearchCategoryDefinition {
   domains: DomainCategory[];
   liveSearchQuery: string;
   description: string;
+  defaultProviders?: Array<
+    | 'openalex'
+    | 'semanticscholar'
+    | 'arxiv'
+    | 'europepmc'
+    | 'pubmed'
+    | 'doaj'
+    | 'core'
+    | 'repec'
+    | 'ssrn'
+    | 'paperswithcode'
+  >;
+  defaultSort?: 'relevance' | 'newest' | 'citations';
+  yearFrom?: number;
 }
 
 export const RESEARCH_CATEGORIES: ResearchCategoryDefinition[] = [
@@ -1551,47 +1565,107 @@ export const RESEARCH_CATEGORIES: ResearchCategoryDefinition[] = [
     shortLabel: 'All Categories',
     domains: [],
     liveSearchQuery: '',
-    description: 'Verified peer-reviewed journals, open-access preprints, and research architectures across all disciplines.',
+    description:
+      'Verified peer-reviewed journals, open-access preprints, working papers, and research architectures across all 10 scholarly sources.',
+  },
+  {
+    id: 'latest_2026',
+    label: 'Latest 2025–2026 Research & Preprints',
+    shortLabel: 'Latest 2025–2026',
+    domains: [
+      'AI & Computing',
+      'Quantum & Physics',
+      'Biomedicine & Genomics',
+      'Economics',
+      'Political Science',
+      'Civil & Computer Engineering',
+      'Clean Tech & Public Service',
+      'Space & Astronomy',
+      'Mathematics',
+    ],
+    liveSearchQuery: 'quantum error correction transformer CRISPR climate macroeconomics',
+    description:
+      'Newly published 2025–2026 peer-reviewed articles and scientific preprints sorted by publication and submission date.',
+    defaultProviders: ['openalex', 'arxiv', 'europepmc', 'pubmed', 'doaj', 'repec', 'ssrn'],
+    defaultSort: 'newest',
+    yearFrom: 2025,
   },
   {
     id: 'ai_ml',
-    label: 'Artificial Intelligence & Machine Learning',
-    shortLabel: 'AI & Machine Learning',
-    domains: ['AI & Computing'],
-    liveSearchQuery: 'artificial intelligence machine learning transformer attention neural networks',
-    description: 'Foundation models, GPU systems architecture, efficient attention, and neuro-symbolic reasoning.',
-  },
-  {
-    id: 'cs_software',
-    label: 'Computer Science & Software Engineering',
-    shortLabel: 'CS & Software Eng',
-    domains: ['AI & Computing', 'Open-Source & DevTools', 'Civil & Computer Engineering'],
-    liveSearchQuery: 'software engineering distributed systems compilers algorithms security',
-    description: 'Operating systems, distributed databases, compiler optimizations, binary analysis, and developer tooling.',
-  },
-  {
-    id: 'civil_mech',
-    label: 'Civil & Mechanical Engineering',
-    shortLabel: 'Civil & Mechanical Eng',
-    domains: ['Civil & Computer Engineering', 'Clean Tech & Public Service'],
-    liveSearchQuery: 'civil engineering structural mechanics finite element fluid dynamics infrastructure',
-    description: 'Planetary infrastructure, structural mechanics, fluid dynamics, robotics, and advanced manufacturing.',
-  },
-  {
-    id: 'physics_math',
-    label: 'Physics & Mathematics',
-    shortLabel: 'Physics & Mathematics',
-    domains: ['Quantum & Physics', 'Mathematics'],
-    liveSearchQuery: 'quantum error correction theoretical physics condensed matter geometry topology',
-    description: 'Quantum fault tolerance, condensed matter, general relativity, differential geometry, and formal proofs.',
+    label: 'Computer Science, AI & Machine Learning',
+    shortLabel: 'Computer Science & AI',
+    domains: ['AI & Computing', 'Open-Source & DevTools'],
+    liveSearchQuery: 'transformer attention mechanism neural network distributed systems compiler',
+    description:
+      'Foundation models, GPU systems architecture, efficient attention, compilers, and Papers with Code implementations.',
+    defaultProviders: ['openalex', 'arxiv', 'paperswithcode', 'semanticscholar', 'doaj'],
+    defaultSort: 'relevance',
   },
   {
     id: 'medicine_biomed',
     label: 'Medicine & Biomedical Research',
     shortLabel: 'Medicine & Biomedical',
     domains: ['Biomedicine & Genomics'],
-    liveSearchQuery: 'biomedical genomics protein allosteric physiology CRISPR clinical trial',
-    description: 'Cellular biophysics, genomic prime editing, allosteric regulation, immunology, and targeted oncology.',
+    liveSearchQuery: 'CRISPR prime editing protein structure clinical trial immunotherapy genomics',
+    description:
+      'Indexed via Europe PMC, PubMed/NCBI E-utilities, and OpenAlex: genomics, cellular biophysics, clinical trials, and oncology.',
+    defaultProviders: ['europepmc', 'pubmed', 'openalex', 'doaj', 'semanticscholar'],
+    defaultSort: 'relevance',
+  },
+  {
+    id: 'physics_math',
+    label: 'Physics & Mathematics',
+    shortLabel: 'Physics & Mathematics',
+    domains: ['Quantum & Physics', 'Mathematics'],
+    liveSearchQuery: 'quantum error correction surface code condensed matter differential geometry theorem',
+    description:
+      'Quantum fault tolerance, condensed matter, general relativity, differential geometry, and formal mathematical proofs.',
+    defaultProviders: ['openalex', 'arxiv', 'semanticscholar', 'doaj', 'paperswithcode'],
+    defaultSort: 'relevance',
+  },
+  {
+    id: 'political_science',
+    label: 'Political Science & Governance',
+    shortLabel: 'Political Science',
+    domains: ['Political Science', 'Social Sciences', 'Startups & Policy'],
+    liveSearchQuery: 'democratic institutions electoral systems public policy international relations governance',
+    description:
+      'Comparative politics, electoral behavior, constitutional governance, international relations, and public administration via OpenAlex, SSRN, and DOAJ.',
+    defaultProviders: ['openalex', 'ssrn', 'doaj', 'semanticscholar'],
+    defaultSort: 'relevance',
+  },
+  {
+    id: 'economics',
+    label: 'Economics, Finance & Working Papers',
+    shortLabel: 'Economics (RePEc / SSRN)',
+    domains: ['Economics', 'Startups & Policy', 'Social Sciences'],
+    liveSearchQuery: 'monetary policy inflation macroeconomics econometrics labor market fiscal policy',
+    description:
+      'Macroeconomics, econometrics, monetary & fiscal policy, and working papers indexed via RePEc/IDEAS, SSRN, OpenAlex, and DOAJ.',
+    defaultProviders: ['repec', 'ssrn', 'openalex', 'doaj', 'semanticscholar'],
+    defaultSort: 'relevance',
+  },
+  {
+    id: 'civil_mech',
+    label: 'Civil, Structural & Mechanical Engineering',
+    shortLabel: 'Civil & Structural Eng',
+    domains: ['Civil & Computer Engineering', 'Clean Tech & Public Service'],
+    liveSearchQuery: 'civil engineering seismic structural mechanics finite element bridge concrete fluid dynamics',
+    description:
+      'Seismic resilience, structural mechanics, finite element analysis, geotechnical engineering, and resilient infrastructure.',
+    defaultProviders: ['openalex', 'doaj', 'arxiv', 'semanticscholar'],
+    defaultSort: 'relevance',
+  },
+  {
+    id: 'climate_env',
+    label: 'Climate & Environmental Science',
+    shortLabel: 'Climate & Environment',
+    domains: ['Clean Tech & Public Service'],
+    liveSearchQuery: 'climate change carbon capture atmospheric water harvesting renewable energy ecosystem',
+    description:
+      'Atmospheric water harvesting, clean energy microgrids, carbon removal, earth system modeling, and ecological resilience.',
+    defaultProviders: ['openalex', 'doaj', 'europepmc', 'arxiv', 'semanticscholar'],
+    defaultSort: 'relevance',
   },
   {
     id: 'space_astronomy',
@@ -1599,39 +1673,32 @@ export const RESEARCH_CATEGORIES: ResearchCategoryDefinition[] = [
     shortLabel: 'Space & Astronomy',
     domains: ['Space & Astronomy'],
     liveSearchQuery: 'JWST exoplanet transmission spectroscopy astrophysics cosmology gravitational waves',
-    description: 'Exoplanet atmospheres, JWST infrared spectroscopy, orbital mechanics, and observational cosmology.',
+    description:
+      'Exoplanet atmospheres, JWST infrared spectroscopy, orbital mechanics, and observational cosmology.',
+    defaultProviders: ['openalex', 'arxiv', 'semanticscholar', 'doaj'],
+    defaultSort: 'relevance',
   },
   {
-    id: 'climate_env',
-    label: 'Climate & Environment',
-    shortLabel: 'Climate & Environment',
-    domains: ['Clean Tech & Public Service'],
-    liveSearchQuery: 'atmospheric water harvesting metal organic framework climate change carbon capture renewable energy',
-    description: 'Atmospheric water harvesting, clean energy microgrids, carbon removal, and ecological resilience.',
+    id: 'social_sciences',
+    label: 'Social Sciences & Public Policy',
+    shortLabel: 'Social Sciences',
+    domains: ['Social Sciences', 'Political Science', 'Economics', 'Startups & Policy'],
+    liveSearchQuery: 'sociology inequality education policy behavioral science demographic transition',
+    description:
+      'Empirical social systems, behavioral science, demographic studies, and institutional policy research.',
+    defaultProviders: ['openalex', 'ssrn', 'doaj', 'repec', 'semanticscholar'],
+    defaultSort: 'relevance',
   },
   {
     id: 'materials_science',
-    label: 'Materials Science',
+    label: 'Materials Science & Nanotechnology',
     shortLabel: 'Materials Science',
     domains: ['Materials Science', 'Quantum & Physics', 'Clean Tech & Public Service'],
-    liveSearchQuery: 'materials science crystallography metal organic framework superconductors perovskite battery',
-    description: 'Nanoporous metal-organic frameworks, high-temperature superconductors, solid-state batteries, and 2D materials.',
-  },
-  {
-    id: 'economics_social',
-    label: 'Economics & Social Sciences',
-    shortLabel: 'Economics & Social Sciences',
-    domains: ['Social Sciences', 'Startups & Policy'],
-    liveSearchQuery: 'macroeconomics econometrics energy transition industrial policy quantitative social science',
-    description: 'Technology diffusion economics, industrial strategy, game theory, and empirical social systems.',
-  },
-  {
-    id: 'emerging_tech',
-    label: 'Emerging Technologies',
-    shortLabel: 'Emerging Technologies',
-    domains: ['Emerging Technologies', 'Open-Source & DevTools', 'AI & Computing'],
-    liveSearchQuery: '3D gaussian splatting brain computer interface synthetic biology quantum computing',
-    description: 'Spatial neural rendering, neurotechnology, synthetic biological circuits, and frontier computational paradigms.',
+    liveSearchQuery: 'metal organic framework perovskite solid state battery superconductor crystallography',
+    description:
+      'Nanoporous metal-organic frameworks, high-temperature superconductors, solid-state batteries, and 2D materials.',
+    defaultProviders: ['openalex', 'arxiv', 'doaj', 'semanticscholar'],
+    defaultSort: 'relevance',
   },
 ];
 

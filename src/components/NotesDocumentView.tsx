@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { DiscoveryItem, StructuredNote } from '../types/orbit';
+import { DiscoveryItem, EquationSpec, StructuredNote } from '../types/orbit';
+import { MathFormulaBlock, LatexTextRenderer } from './MathFormulaBlock';
 import {
   FileText,
   BookOpen,
@@ -117,6 +118,55 @@ export const NotesDocumentView: React.FC<NotesDocumentViewProps> = ({
   const [editMethods, setEditMethods] = useState('');
   const [editLimitations, setEditLimitations] = useState('');
   const [editPersonalNotes, setEditPersonalNotes] = useState('');
+  const [showAddEquationForm, setShowAddEquationForm] = useState(false);
+  const [newEqTitle, setNewEqTitle] = useState('');
+  const [newEqFormula, setNewEqFormula] = useState('');
+  const [newEqIntuition, setNewEqIntuition] = useState('');
+
+  const handleAddEquationToNote = async () => {
+    if (!activeNote || !newEqFormula.trim()) return;
+    const newEq: EquationSpec = {
+      id: `eq-custom-${Date.now()}`,
+      title: newEqTitle.trim() || `Equation ${activeNote.equations.length + 1}`,
+      formula: newEqFormula.trim(),
+      intuition:
+        newEqIntuition.trim() ||
+        'Quantitative relationship derived or annotated during research study.',
+      variables: [],
+    };
+    const updated: StructuredNote = {
+      ...activeNote,
+      equations: [...activeNote.equations, newEq],
+      updatedAt: new Date().toISOString(),
+    };
+    setAutosaveStatus('saving');
+    try {
+      const res = await onSaveOrUpdateNote(updated);
+      setAutosaveStatus(res === false ? 'error' : 'saved');
+      setNewEqTitle('');
+      setNewEqFormula('');
+      setNewEqIntuition('');
+      setShowAddEquationForm(false);
+    } catch {
+      setAutosaveStatus('error');
+    }
+  };
+
+  const handleRemoveEquationFromNote = async (indexToRemove: number) => {
+    if (!activeNote) return;
+    const updated: StructuredNote = {
+      ...activeNote,
+      equations: activeNote.equations.filter((_, idx) => idx !== indexToRemove),
+      updatedAt: new Date().toISOString(),
+    };
+    setAutosaveStatus('saving');
+    try {
+      const res = await onSaveOrUpdateNote(updated);
+      setAutosaveStatus(res === false ? 'error' : 'saved');
+    } catch {
+      setAutosaveStatus('error');
+    }
+  };
 
   const startEditing = (note: StructuredNote) => {
     setEditTitle(note.discoveryTitle);
@@ -648,9 +698,9 @@ export const NotesDocumentView: React.FC<NotesDocumentViewProps> = ({
                     className="w-full p-4 rounded-xl bg-black/50 border border-white/20 text-sm sm:text-base text-white leading-relaxed focus:outline-none focus:border-emerald-400"
                   />
                 ) : (
-                  <p className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
-                    {activeNote.executiveSummary}
-                  </p>
+                  <div className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
+                    <LatexTextRenderer text={activeNote.executiveSummary} />
+                  </div>
                 )}
               </section>
 
@@ -671,9 +721,9 @@ export const NotesDocumentView: React.FC<NotesDocumentViewProps> = ({
                   />
                 ) : (
                   <div className="pl-4 border-l-2 border-emerald-400/60 space-y-2">
-                    <p className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
-                      {activeNote.whyItMatters}
-                    </p>
+                    <div className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
+                      <LatexTextRenderer text={activeNote.whyItMatters} />
+                    </div>
                   </div>
                 )}
 
@@ -761,9 +811,9 @@ export const NotesDocumentView: React.FC<NotesDocumentViewProps> = ({
                     <span className="text-[11px] font-mono uppercase tracking-wider text-sky-300 block">
                       Intuition &amp; Worked Walkthrough
                     </span>
-                    <p className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
-                      {getWorkedExampleForNote(activeNote, linkedPaper)}
-                    </p>
+                    <div className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
+                      <LatexTextRenderer text={getWorkedExampleForNote(activeNote, linkedPaper)} />
+                    </div>
                   </div>
                 )}
               </section>
@@ -784,47 +834,152 @@ export const NotesDocumentView: React.FC<NotesDocumentViewProps> = ({
                     className="w-full p-4 rounded-xl bg-black/50 border border-white/20 text-sm sm:text-base text-white leading-relaxed focus:outline-none focus:border-emerald-400"
                   />
                 ) : (
-                  <p className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
-                    {activeNote.methodsAndEvidence}
-                  </p>
+                  <div className="text-base text-[#E8E6E0] leading-[1.85] whitespace-pre-line">
+                    <LatexTextRenderer text={activeNote.methodsAndEvidence} />
+                  </div>
                 )}
               </section>
 
-              {/* 7. Equations & Quantitative Models (When Present) */}
-              {activeNote.equations.length > 0 && (
-                <section id="note-sec-formulas" className="space-y-4 scroll-mt-6">
+              {/* 7. Equations & Quantitative Models (High-Fidelity KaTeX) */}
+              <section id="note-sec-formulas" className="space-y-4 scroll-mt-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
-                    7. Formulas &amp; Quantitative Relationships
+                    7. Formulas &amp; Quantitative Relationships (LaTeX)
                   </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddEquationForm((prev) => !prev)}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-xs font-medium text-emerald-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>{showAddEquationForm ? 'Close LaTeX Editor' : 'Add LaTeX Equation'}</span>
+                  </button>
+                </div>
+
+                {showAddEquationForm && (
+                  <div className="p-4 sm:p-5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono uppercase tracking-wider text-emerald-300">
+                        Interactive LaTeX Equation Composer
+                      </span>
+                      <span className="text-[11px] text-white/45 font-mono">
+                        Rendered live with KaTeX
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        value={newEqTitle}
+                        onChange={(e) => setNewEqTitle(e.target.value)}
+                        placeholder="Equation Title (e.g., Scaled Dot-Product Attention)"
+                        className="px-3.5 py-2 rounded-xl bg-black/50 border border-white/15 text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-400"
+                      />
+                      <input
+                        type="text"
+                        value={newEqIntuition}
+                        onChange={(e) => setNewEqIntuition(e.target.value)}
+                        placeholder="Physical / Mathematical Intuition..."
+                        className="px-3.5 py-2 rounded-xl bg-black/50 border border-white/15 text-xs sm:text-sm text-white focus:outline-none focus:border-emerald-400"
+                      />
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={newEqFormula}
+                      onChange={(e) => setNewEqFormula(e.target.value)}
+                      placeholder="Enter LaTeX expression, e.g., \text{Attention}(Q,K,V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V"
+                      className="w-full p-3 rounded-xl bg-black/60 border border-white/15 text-xs sm:text-sm text-emerald-200 font-mono focus:outline-none focus:border-emerald-400"
+                    />
+                    {newEqFormula.trim() && (
+                      <div className="space-y-1">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-white/45">
+                          Live Typographic Preview
+                        </span>
+                        <MathFormulaBlock
+                          formula={newEqFormula}
+                          title={newEqTitle || 'Preview'}
+                          showControls={false}
+                        />
+                      </div>
+                    )}
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddEquationForm(false)}
+                        className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs text-white/70"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddEquationToNote}
+                        disabled={!newEqFormula.trim()}
+                        className="px-4 py-1.5 rounded-lg bg-emerald-400 hover:bg-emerald-300 disabled:opacity-40 text-black font-semibold text-xs transition-colors cursor-pointer"
+                      >
+                        Save Equation to Note
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {activeNote.equations.length > 0 ? (
                   <div className="space-y-4">
                     {activeNote.equations.map((eq, idx) => (
                       <div
                         key={idx}
                         className="p-5 rounded-2xl bg-black/40 border border-white/12 space-y-3"
                       >
-                        <div className="text-xs font-semibold text-white/85">{eq.title}</div>
-                        <div className="p-3.5 rounded-xl bg-white/[0.03] font-mono text-sm sm:text-base text-emerald-300 overflow-x-auto">
-                          {eq.formula}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs sm:text-sm font-semibold text-white/90">
+                            {eq.title}
+                          </div>
+                          {isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEquationFromNote(idx)}
+                              className="text-[11px] text-rose-300/75 hover:text-rose-300 font-mono"
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
+                        <MathFormulaBlock formula={eq.formula} title={eq.title} />
                         {eq.variables && eq.variables.length > 0 && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs text-white/75">
                             {eq.variables.map((v, vIdx) => (
-                              <div key={vIdx} className="font-mono">
-                                <strong className="text-white">{v.symbol}</strong>: {v.meaning} (
-                                {v.unit})
+                              <div
+                                key={vIdx}
+                                className="p-2 rounded-lg bg-white/[0.02] border border-white/[0.06] font-mono flex items-baseline gap-1.5"
+                              >
+                                <MathFormulaBlock
+                                  formula={v.symbol}
+                                  inline
+                                  showControls={false}
+                                  className="font-bold text-emerald-300"
+                                />
+                                <span className="text-white/80">
+                                  : {v.meaning} {v.unit ? `(${v.unit})` : ''}
+                                </span>
                               </div>
                             ))}
                           </div>
                         )}
-                        <p className="text-xs sm:text-sm text-white/80 leading-relaxed pt-1 border-t border-white/10">
+                        <div className="text-xs sm:text-sm text-white/80 leading-relaxed pt-2 border-t border-white/10">
                           <strong className="text-white">Physical / Mathematical Intuition:</strong>{' '}
-                          {eq.intuition}
-                        </p>
+                          <LatexTextRenderer text={eq.intuition} />
+                        </div>
                       </div>
                     ))}
                   </div>
-                </section>
-              )}
+                ) : (
+                  <div className="p-4 rounded-xl bg-white/[0.02] border border-white/10 text-xs sm:text-sm text-white/55">
+                    No formal equations imported yet for this note. Click{' '}
+                    <strong className="text-emerald-300">+ Add LaTeX Equation</strong> above or use{' '}
+                    <code className="text-emerald-300">$inline$</code> /{' '}
+                    <code className="text-emerald-300">$$display$$</code> syntax inside any note
+                    section.
+                  </div>
+                )}
+              </section>
 
               {/* 8. Limitations & Critical Evaluation */}
               <section id="note-sec-limitations" className="space-y-3 scroll-mt-6">
@@ -933,8 +1088,12 @@ export const NotesDocumentView: React.FC<NotesDocumentViewProps> = ({
                     />
                   ) : (
                     <div className="p-5 rounded-xl bg-white/[0.02] border border-white/10 text-base text-[#E8E6E0] leading-relaxed whitespace-pre-line">
-                      {activeNote.userPersonalAnnotations ||
-                        'No personal annotations added yet. Click "Edit Mode" or save passages from the Article Reader.'}
+                      <LatexTextRenderer
+                        text={
+                          activeNote.userPersonalAnnotations ||
+                          'No personal annotations added yet. Click "Edit Mode" or save passages from the Article Reader.'
+                        }
+                      />
                     </div>
                   )}
                 </div>

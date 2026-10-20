@@ -45,7 +45,8 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react';
-import { MathFormulaBlock } from './MathFormulaBlock';
+import { MathFormulaBlock, LatexTextRenderer } from './MathFormulaBlock';
+import { CitationNetworkGraph } from './CitationNetworkGraph';
 
 interface ResearchWorkspaceModalProps {
   item: DiscoveryItem;
@@ -75,6 +76,8 @@ interface ResearchWorkspaceModalProps {
   allDiscoveries?: DiscoveryItem[];
   onSelectDiscovery?: (item: DiscoveryItem) => void;
   onFocusModeChange?: (isFocus: boolean) => void;
+  onTriggerGlobalSearch?: (query: string) => void;
+  onOpenRepoInExplorer?: (repoFullName: string) => void;
 }
 
 interface ExplainConversationTurn {
@@ -215,6 +218,8 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
   allDiscoveries = [],
   onSelectDiscovery,
   onFocusModeChange,
+  onTriggerGlobalSearch,
+  onOpenRepoInExplorer,
 }) => {
   const mapInitialMode = (
     tab: 'reader' | 'professor' | 'visual' | 'notes' | 'quiz'
@@ -2204,6 +2209,21 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
+                    {item.providerLinks &&
+                      item.providerLinks.length > 1 &&
+                      item.providerLinks.map((pl, idx) => (
+                        <a
+                          key={idx}
+                          href={pl.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1.5 rounded-full bg-white/[0.06] hover:bg-white/[0.14] border border-white/10 text-[11px] font-mono text-emerald-300 inline-flex items-center gap-1 transition-colors"
+                          title={`Verified record on ${pl.providerName}`}
+                        >
+                          <span>{pl.providerName}</span>
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </a>
+                      ))}
                     <a
                       href={item.fullTextUrl || item.sourceUrl}
                       target="_blank"
@@ -2212,7 +2232,7 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                     >
                       <span>
                         {item.sourceType === 'Preprint (arXiv / bioRxiv)'
-                          ? 'Open arXiv PDF / Page'
+                          ? 'Open Preprint / PDF'
                           : item.sourceType === 'GitHub Repository'
                           ? 'Open GitHub Repository'
                           : 'Open Publisher / DOI Page'}
@@ -2253,9 +2273,9 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                   </div>
                 </div>
 
-                <p className={getReaderParagraphClasses()}>
-                  {item.readerLayers.quickOrientation}
-                </p>
+                <div className={getReaderParagraphClasses()}>
+                  <LatexTextRenderer text={item.readerLayers.quickOrientation} />
+                </div>
 
                 <div className="p-5 sm:p-6 rounded-2xl bg-emerald-950/20 border-l-4 border-emerald-400 border-y border-r border-emerald-500/15 space-y-2.5">
                   <div className="flex items-center justify-between">
@@ -2669,20 +2689,32 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                 </div>
               </section>
 
-              {/* SECTION 6: REFERENCES & CITATIONS */}
+              {/* SECTION 6: CITATION NETWORK, MULTI-SOURCE PROVENANCE & REFERENCES */}
               <section id="sec-references" className="space-y-6 pt-12 sm:pt-14 border-t border-white/[0.08]">
                 <div className="flex flex-wrap items-baseline justify-between gap-3 pb-3 border-b border-white/[0.06]">
                   <div>
                     <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-mono tracking-widest uppercase text-emerald-400 font-semibold">
-                      06 // CITATIONS &amp; REPOSITORY
+                      06 // CITATION NETWORK &amp; REPOSITORIES
                     </span>
                     <h2 className={`${getReaderHeadingClasses('h2')} mt-1.5`}>
-                      References &amp; Source Citations
+                      Interactive Citation Graph &amp; Source References
                     </h2>
                   </div>
                 </div>
 
-                <div className="space-y-3">
+                {/* D3 Interactive Citation Network Visualization */}
+                <CitationNetworkGraph
+                  item={item}
+                  allDiscoveries={allDiscoveries}
+                  onSelectDiscovery={onSelectDiscovery}
+                  onTriggerGlobalSearch={onTriggerGlobalSearch}
+                  onOpenRepoInExplorer={onOpenRepoInExplorer}
+                />
+
+                <div className="space-y-3 pt-2">
+                  <div className="text-xs font-mono uppercase tracking-wider text-white/55">
+                    Bibliographic References &amp; Verified Records
+                  </div>
                   {item.readerLayers.references.map((ref) => (
                     <div
                       key={ref.id}
@@ -3495,22 +3527,22 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
                   )}
                 </section>
 
-                {/* 5. Formulas & Key Equations */}
+                {/* 5. Formulas & Key Equations (High-Fidelity KaTeX) */}
                 <section id="modal-note-sec-5" className="space-y-3 pt-4 border-t border-white/10">
                   <h2 className="text-lg font-bold text-white">
-                    5. Key Formulas &amp; Mathematical Intuition
+                    5. Key Formulas &amp; Mathematical Intuition (LaTeX)
                   </h2>
                   {noteDraft.equations.length > 0 ? (
                     noteDraft.equations.map((eq) => (
                       <div
                         key={eq.id}
-                        className="p-4 rounded-2xl bg-black/40 border border-white/10 space-y-2"
+                        className="p-4 rounded-2xl bg-black/40 border border-white/10 space-y-3"
                       >
-                        <div className="text-xs text-white/60">{eq.title}</div>
-                        <div className="font-mono text-sm sm:text-base text-emerald-300">
-                          {eq.formula}
+                        <div className="text-xs font-semibold text-white/85">{eq.title}</div>
+                        <MathFormulaBlock formula={eq.formula} title={eq.title} />
+                        <div className="text-sm text-white/80 leading-relaxed">
+                          <LatexTextRenderer text={eq.intuition} />
                         </div>
-                        <p className="text-sm text-white/80">{eq.intuition}</p>
                       </div>
                     ))
                   ) : (

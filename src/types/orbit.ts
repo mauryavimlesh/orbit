@@ -8,9 +8,90 @@ export type DomainCategory =
   | 'Space & Astronomy'
   | 'Mathematics'
   | 'Social Sciences'
+  | 'Political Science'
+  | 'Economics'
   | 'Civil & Computer Engineering'
   | 'Materials Science'
   | 'Emerging Technologies';
+
+export type ResearchProviderId =
+  | 'openalex'
+  | 'semanticscholar'
+  | 'arxiv'
+  | 'europepmc'
+  | 'pubmed'
+  | 'doaj'
+  | 'core'
+  | 'repec'
+  | 'ssrn'
+  | 'paperswithcode';
+
+export interface ProviderRecordLink {
+  providerId: ResearchProviderId;
+  providerName: string;
+  url: string;
+  externalId?: string;
+}
+
+export interface ProviderStatusReport {
+  providerId: ResearchProviderId;
+  providerName: string;
+  status: 'ok' | 'rate_limited' | 'requires_key' | 'error' | 'skipped';
+  count: number;
+  latencyMs: number;
+  endpointUsed: string;
+  message?: string;
+  requiresKey?: boolean;
+  keyConfigured?: boolean;
+}
+
+export interface AssociatedCodeRepo {
+  fullName: string;
+  url: string;
+  stars?: number;
+  description?: string;
+  language?: string;
+  provenance: 'Papers with Code / HF Verified' | 'Verified Companion' | 'Topic Recommendation';
+}
+
+export interface CitationNetworkNode {
+  id: string;
+  canonicalId: string;
+  title: string;
+  authors: string[];
+  year: string;
+  publishedAt: string;
+  venue: string;
+  sourceName: string;
+  sourceUrl: string;
+  pdfUrl?: string;
+  abstractText?: string;
+  citationCount: number;
+  isOpenAccess: boolean;
+  evidenceStatus: EvidenceStatus;
+  relationType: 'current' | 'referenced_by_current' | 'cites_current' | 'same_author' | 'related_topic';
+  isVerifiedCitation: boolean;
+  providerName: string;
+}
+
+export interface CitationNetworkEdge {
+  id: string;
+  source: string;
+  target: string;
+  relationshipLabel: 'Cites' | 'Cited By' | 'Same Author' | 'Related Topic';
+  isVerifiedCitation: boolean;
+}
+
+export interface CitationNetworkPayload {
+  paperId: string;
+  canonicalId: string;
+  title: string;
+  nodes: CitationNetworkNode[];
+  edges: CitationNetworkEdge[];
+  associatedRepos: AssociatedCodeRepo[];
+  sourcesChecked: string[];
+  retrievedAt: string;
+}
 
 export type SourceType =
   | 'Peer-Reviewed Journal'
@@ -155,6 +236,19 @@ export interface DiscoveryItem {
   fullTextUrl?: string;
   highStakesMedicalNotice?: boolean;
   relatedRepoQuery?: string;
+  // Multi-provider provenance & bibliographic identifiers
+  primaryProvider?: ResearchProviderId;
+  contributingSources?: string[];
+  providerLinks?: ProviderRecordLink[];
+  doi?: string;
+  pmid?: string;
+  pmcid?: string;
+  arxivId?: string;
+  citationCount?: number;
+  referenceCount?: number;
+  venue?: string;
+  publicationYear?: number;
+  associatedRepos?: AssociatedCodeRepo[];
 }
 
 export type HighlightColor = 'emerald' | 'amber' | 'sky' | 'purple' | 'rose';

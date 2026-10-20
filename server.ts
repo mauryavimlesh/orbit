@@ -5,6 +5,12 @@ import path from 'path';
 import fs from 'fs';
 import { DatabaseSync } from 'node:sqlite';
 import { GoogleGenAI, Type, ThinkingLevel } from '@google/genai';
+import {
+  ALL_PROVIDER_IDS,
+  executeUnifiedMultiSourceSearch,
+  fetchCitationNetworkAndRelated,
+} from './src/server/researchProviders';
+import { ResearchProviderId } from './src/types/orbit';
 
 dotenv.config();
 
@@ -379,293 +385,207 @@ async function startServer() {
     return 'AI & Computing';
   };
 
-  // 2. Multi-Source Live Discovery Search (OpenAlex + arXiv + PubMed + Crossref + GitHub)
+  // 2. Unified Multi-Source Live Discovery Search (10 Providers + Deduplication + Provenance)
   app.get('/api/discover/search', async (req, res) => {
     const query = String(req.query.q || 'quantum error correction').trim();
     const requestedDomain = String(req.query.domain || '').trim();
-    const cacheKey = `discover_search_v4:${query.toLowerCase()}:${requestedDomain.toLowerCase()}`;
+    const category = String(req.query.category || '').trim();
+    const rawProviders = String(req.query.providers || '').trim();
+    const yearFrom = req.query.yearFrom ? Number(req.query.yearFrom) : undefined;
+    const yearTo = req.query.yearTo ? Number(req.query.yearTo) : undefined;
+    const sortBy = (req.query.sort as 'relevance' | 'newest' | 'citations') || 'relevance';
+    const openAccessOnly = req.query.oa === 'true';
+    const publicationType =
+      (req.query.pubType as 'all' | 'peer_reviewed' | 'preprint') || 'all';
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const perProviderLimit = Math.min(10, Math.max(2, Number(req.query.limit) || 5));
+
+    const providers: ResearchProviderId[] | undefined = rawProviders
+      ? (rawProviders
+          .split(',')
+          .map((s) => s.trim().toLowerCase())
+          .filter((s) =>
+            ALL_PROVIDER_IDS.includes(s as ResearchProviderId)
+          ) as ResearchProviderId[])
+      : undefined;
+
+    const cacheKey = `discover_unified_v6:${query.toLowerCase()}:${requestedDomain.toLowerCase()}:${category}:${
+      providers?.join(',') || 'auto'
+    }:${yearFrom || ''}-${yearTo || ''}:${sortBy}:${openAccessOnly}:${publicationType}:${page}:${perProviderLimit}`;
+
     const cached = getCachedResponse<any>(cacheKey);
-    if (cached && Array.isArray(cached.data?.items)) {
-      const seen = new Set<string>();
-      const dedupedCached = cached.data.items.filter((item: any) => {
-        if (!item?.id || seen.has(item.id)) return false;
-        seen.add(item.id);
-        return true;
-      });
+    if (cached && Array.isArray(cached.data?.items) && cached.data.items.length > 0) {
       res.json({
         ...cached.data,
-        items: dedupedCached,
         retrievedAt: cached.fetchedAt,
         cached: true,
       });
       return;
     }
 
-    const retrievedAt = new Date().toISOString();
-    const sourcesChecked: string[] = [];
-    const results: any[] = [];
-
-    // A. Query OpenAlex Works
     try {
-      const oaUrl = `https://api.openalex.org/works?search=${encodeURIComponent(
-        query
-      )}&per-page=5&mailto=${encodeURIComponent(POLITE_EMAIL)}`;
-      const oaRes = await fetchWithRetry(oaUrl);
-      if (oaRes.ok) {
-        sourcesChecked.push('OpenAlex');
-        const oaData = await oaRes.json();
-        for (let idx = 0; idx < (oaData.results || []).length; idx++) {
-          const work = oaData.results[idx];
-          const reconstructedAbstract = reconstructOpenAlexAbstract(
-            work.abstract_inverted_index
-          );
-          const hasAbstract = Boolean(reconstructedAbstract && reconstructedAbstract.length > 20);
-          const abstractText = hasAbstract
-            ? reconstructedAbstract
-            : `Abstract text is not openly indexed in OpenAlex for this publication (${work.cited_by_count || 0} recorded citations). Use the primary DOI/publisher link to view the full record.`;
-          const canonicalId = String(work.doi || work.id || `oa-work-${idx}`);
-          const uniqueSlug = canonicalId
-            .replace(/^https?:\/\/(doi\.org\/|openalex\.org\/)?/i, '')
-            .replace(/[^a-zA-Z0-9_-]/g, '-');
-          const uniqueId = `oa-${uniqueSlug || idx}`;
-          const isOa = Boolean(work.open_access?.is_oa);
-          const oaUrlLink = work.open_access?.oa_url || (isOa ? work.doi || work.id : undefined);
-          const authorList = (work.authorships || [])
-            .slice(0, 5)
-            .map((a: any) => a.author?.display_name)
-            .filter(Boolean);
-          const inferredDomain = inferResearchDomain(
-            `${query} ${work.title || ''} ${work.primary_topic?.display_name || ''}`,
-            requestedDomain
-          );
+      const searchResult = await executeUnifiedMultiSourceSearch({
+        query,
+        category,
+        domain: requestedDomain,
+        providers,
+        yearFrom: yearFrom && !Number.isNaN(yearFrom) ? yearFrom : undefined,
+        yearTo: yearTo && !Number.isNaN(yearTo) ? yearTo : undefined,
+        sortBy,
+        openAccessOnly,
+        publicationType,
+        page,
+        perProviderLimit,
+      });
 
-          results.push({
-            id: uniqueId,
-            canonicalId,
-            title: work.title || 'Untitled Research Work',
-            shortSubtitle: `${work.primary_location?.source?.display_name || 'Scholarly Publication'} · Cited by ${work.cited_by_count || 0}`,
-            oneSentenceWhyItMatters: hasAbstract
-              ? abstractText.slice(0, 240) + (abstractText.length > 240 ? '...' : '')
-              : `Peer-reviewed publication in ${work.primary_location?.source?.display_name || 'scholarly venue'} (${work.publication_year || 'recent'}), cited ${work.cited_by_count || 0} times.`,
-            domain: inferredDomain,
-            sourceName: work.primary_location?.source?.display_name || 'OpenAlex Scholarly Record',
-            sourceType: 'Peer-Reviewed Journal',
-            evidenceStatus: 'Peer-Reviewed',
-            publishedAt: work.publication_date || String(work.publication_year || '2025'),
-            retrievedAt,
-            sourceUrl: work.doi || work.id || 'https://openalex.org',
-            authors: authorList.length > 0 ? authorList : ['Authors listed on publisher record'],
-            artworkTheme: 'quantum_twilight',
-            visualSandboxId: 'sparse_attention',
-            isLiveFetched: true,
-            fullTextAvailable: isOa,
-            fullTextUrl: oaUrlLink,
-            relatedRepoQuery: query,
-            signals: {
-              freshness: `Published ${work.publication_date || work.publication_year}`,
-              evidenceTier: 'High (Empirical / Replicated)',
-              momentum: `${work.cited_by_count || 0} Citations`,
-              novelty: 'Primary scholarly record fetched live',
-              learningValue: isOa ? 'Open-Access Full Text Available' : 'Verified Metadata & Abstract',
-            },
-            readerLayers: {
-              quickOrientation: abstractText,
-              sourceAndStatus: `Verified OpenAlex record (${canonicalId}). Publication venue: ${work.primary_location?.source?.display_name || 'Scholarly Journal'}. Open Access Full Text: ${isOa ? 'Available' : 'Publisher-hosted (see DOI link)'}.`,
-              beginnerExplanation: hasAbstract
-                ? `This paper investigates: ${abstractText}`
-                : `This peer-reviewed work ("${work.title}") is indexed in OpenAlex with ${work.cited_by_count || 0} citations. Because the publisher does not deposit an open abstract in OpenAlex, open the original DOI link to read the full text.`,
-              beginnerExplanationHinglish: hasAbstract
-                ? `Yeh research paper "${work.title}" (${work.publication_year}) is vishay ke mukhya findings aur methodology ko present karta hai: ${abstractText.slice(0, 320)}`
-                : `Yeh peer-reviewed paper ("${work.title}") OpenAlex mein ${work.cited_by_count || 0} citations ke saath दर्ज hai. Full text padhne ke liye original DOI link kholein.`,
-              prerequisites: ['Foundational domain concepts', 'Research methodology & study design'],
-              historicalFoundations: `Indexed in OpenAlex with ${work.cited_by_count || 0} incoming scholarly citations.`,
-              coreMechanism: hasAbstract
-                ? [
-                    abstractText,
-                    `Published in ${work.primary_location?.source?.display_name || 'peer-reviewed venue'} (${work.publication_date || work.publication_year}).`,
-                  ]
-                : [
-                    'Full methodological steps are hosted on the publisher page (abstract not deposited in open metadata).',
-                  ],
-              coreMechanismHinglish: [
-                hasAbstract
-                  ? abstractText
-                  : 'Full methodology publisher ke original DOI page par upalabdh hai.',
-              ],
-              methodsAndEvidence: `Published in ${work.primary_location?.source?.display_name || 'scholarly venue'}; cited ${work.cited_by_count || 0} times in OpenAlex.`,
-              findings: hasAbstract
-                ? abstractText
-                : 'Refer to the primary DOI link for complete experimental tables and figures.',
-              limitationsAndUncertainty: isOa
-                ? 'Open-access full text is linked via the publisher/repository URL. Always inspect sample sizes, controls, and replication parameters in the full PDF.'
-                : 'Full text requires visiting the publisher DOI link; only verified bibliographic metadata and abstract (when deposited) are shown inside ORBIT.',
-              applicationsAndImplications: 'Primary scholarly literature for research review and study notes.',
-              criticalAnalysisAndFalsifiability:
-                'Cross-check citing papers and independent replications before treating single-study results as universal.',
-              relatedWork: ['See linked OpenAlex citation graph'],
-              whatToWatchNext: 'Subsequent citing papers and replication studies.',
-              references: [
-                {
-                  id: `ref-${uniqueId}`,
-                  label: work.title || 'Primary Source',
-                  authors:
-                    authorList.slice(0, 4).join(', ') || 'Authors listed on publisher page',
-                  venue: work.primary_location?.source?.display_name || 'OpenAlex',
-                  year: String(work.publication_year || '2025'),
-                  url: work.doi || work.id || 'https://openalex.org',
-                  doiOrId: canonicalId,
-                  statusLabel: isOa ? 'Open Access Full Text' : 'Peer-Reviewed Record',
-                },
-              ],
-            },
-            equations: [],
-            quiz: [
-              {
-                id: `q-${uniqueId}`,
-                question:
-                  'What is the difference between reading an indexed abstract and inspecting the full paper?',
-                options: [
-                  'Abstracts include all raw datasets and supplementary tables',
-                  'Abstracts summarize the main question and conclusion, while the full paper provides complete methodology, controls, and limitations',
-                  'There is no difference',
-                  'High citation counts guarantee zero methodological limitations',
-                ],
-                correctIndex: 1,
-                explanationWhyRight:
-                  'A paper abstract provides a high-level summary; evaluating experimental validity requires inspecting the full methodology, controls, and limitations.',
-                misconceptionDiagnosed:
-                  'Treating an abstract or citation count as a substitute for full methodological review.',
-              },
-            ],
-          });
-        }
+      if (searchResult.items.length > 0) {
+        setCachedResponse(cacheKey, searchResult, 1000 * 60 * 20);
       }
-    } catch {
-      // continue to next source
+      res.json(searchResult);
+    } catch (err: any) {
+      res.status(500).json({
+        error: err.message || 'Unified multi-source search failed',
+        items: [],
+        sourcesChecked: [],
+        providerReports: [],
+        retrievedAt: new Date().toISOString(),
+      });
+    }
+  });
+
+  // 2A-1. Live Citation Graph & Related Paper/Code Discovery (/api/discover/citations)
+  app.get('/api/discover/citations', async (req, res) => {
+    const paperId = String(req.query.paperId || 'current').trim();
+    const canonicalId = String(req.query.canonicalId || '').trim();
+    const title = String(req.query.title || '').trim();
+    const doi = String(req.query.doi || '').trim() || undefined;
+    const arxivId = String(req.query.arxivId || '').trim() || undefined;
+    const pmid = String(req.query.pmid || '').trim() || undefined;
+    const domain = String(req.query.domain || '').trim() || undefined;
+
+    if (!title && !canonicalId && !doi) {
+      res.status(400).json({ error: 'Paper title or canonicalId required for citation graph.' });
+      return;
     }
 
-    // B. Query arXiv API (Atom XML parsed safely on server)
-    try {
-      const arxivUrl = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(
-        query
-      )}&start=0&max_results=4&sortBy=relevance`;
-      const axRes = await fetchWithRetry(arxivUrl);
-      if (axRes.ok) {
-        sourcesChecked.push('arXiv');
-        const xml = await axRes.text();
-        const entries = xml.split('<entry>').slice(1);
-        for (let idx = 0; idx < entries.length; idx++) {
-          const entry = entries[idx];
-          const idMatch = entry.match(/<id>([\s\S]*?)<\/id>/)?.[1]?.trim() || '';
-          const titleMatch =
-            entry.match(/<title>([\s\S]*?)<\/title>/)?.[1]?.replace(/\s+/g, ' ').trim() || '';
-          const summaryMatch =
-            entry.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.replace(/\s+/g, ' ').trim() || '';
-          const publishedMatch =
-            entry.match(/<published>([\s\S]*?)<\/published>/)?.[1]?.trim().slice(0, 10) || '';
-          const authorMatches = Array.from(
-            entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g)
-          )
-            .map((m) => m[1].trim())
-            .filter(Boolean);
-          const pdfUrl = idMatch.includes('/abs/')
-            ? idMatch.replace('/abs/', '/pdf/')
-            : idMatch;
-
-          if (titleMatch && idMatch) {
-            const arxivSlug = idMatch
-              .replace(/^https?:\/\/arxiv\.org\/abs\//i, '')
-              .replace(/[^a-zA-Z0-9_-]/g, '-');
-            const uniqueArxivId = `arxiv-${arxivSlug || idx}`;
-            const inferredDomain = inferResearchDomain(
-              `${query} ${titleMatch} ${summaryMatch}`,
-              requestedDomain
-            );
-
-            results.push({
-              id: uniqueArxivId,
-              canonicalId: idMatch,
-              title: titleMatch,
-              shortSubtitle: `arXiv Open-Access Preprint · ${publishedMatch}`,
-              oneSentenceWhyItMatters: summaryMatch,
-              domain: inferredDomain,
-              sourceName: 'arXiv.org Open-Access Archive',
-              sourceType: 'Preprint (arXiv / bioRxiv)',
-              evidenceStatus: 'Preprint / Not Yet Peer-Reviewed',
-              publishedAt: publishedMatch,
-              retrievedAt,
-              sourceUrl: idMatch,
-              authors:
-                authorMatches.length > 0 ? authorMatches.slice(0, 5) : ['arXiv Authors'],
-              artworkTheme: 'sparse_attention',
-              visualSandboxId: 'quantum_threshold',
-              isLiveFetched: true,
-              fullTextAvailable: true,
-              fullTextUrl: pdfUrl,
-              relatedRepoQuery: query,
-              signals: {
-                freshness: `arXiv Preprint (${publishedMatch})`,
-                evidenceTier: 'Moderate (Preprint / Primary Code)',
-                momentum: 'Open-Access Manuscript on arXiv',
-                novelty: 'Research preprint with full PDF available',
-                learningValue: 'Full PDF & Abstract Openly Accessible',
-              },
-              readerLayers: {
-                quickOrientation: summaryMatch,
-                sourceAndStatus: `Open-access preprint retrieved live from arXiv.org (${idMatch}). Full text PDF is openly available at ${pdfUrl}. Note: Preprints have not yet completed journal peer review.`,
-                beginnerExplanation: summaryMatch,
-                beginnerExplanationHinglish: `Yeh arXiv preprint (${publishedMatch}) is vishay par naye research results aur methodology pesh karta hai: ${summaryMatch}`,
-                prerequisites: ['Foundational domain concepts', 'Preprint evaluation'],
-                historicalFoundations:
-                  'Archived on Cornell University arXiv open-access repository.',
-                coreMechanism: [summaryMatch],
-                coreMechanismHinglish: [summaryMatch],
-                methodsAndEvidence: `Full open-access manuscript and figures available directly via arXiv PDF (${pdfUrl}).`,
-                findings: summaryMatch,
-                limitationsAndUncertainty:
-                  'Preprint status: This manuscript has not yet undergone formal peer review. Verify claims against the full arXiv PDF and subsequent peer-reviewed versions.',
-                applicationsAndImplications: 'Open-access scientific manuscript.',
-                criticalAnalysisAndFalsifiability:
-                  'Inspect the full arXiv PDF for experimental setup, proofs, and open-source code links.',
-                relatedWork: ['arXiv e-Print archive'],
-                whatToWatchNext: 'Peer-reviewed journal publication and replication studies.',
-                references: [
-                  {
-                    id: `ref-${uniqueArxivId}`,
-                    label: titleMatch,
-                    authors: authorMatches.slice(0, 4).join(', ') || 'arXiv Authors',
-                    venue: 'arXiv.org',
-                    year: publishedMatch.slice(0, 4),
-                    url: idMatch,
-                    doiOrId: idMatch,
-                    statusLabel: 'Open-Access Preprint (Full PDF Available)',
-                  },
-                ],
-              },
-              equations: [],
-              quiz: [],
-            });
-          }
-        }
-      }
-    } catch {
-      // continue
+    const cacheKey = `citation_graph_v2:${(canonicalId || doi || title).toLowerCase().slice(0, 120)}`;
+    const cached = getCachedResponse<any>(cacheKey);
+    if (cached && Array.isArray(cached.data?.nodes)) {
+      res.json({ ...cached.data, retrievedAt: cached.fetchedAt, cached: true });
+      return;
     }
 
-    const seenIds = new Set<string>();
-    const seenCanonical = new Set<string>();
-    const uniqueResults = results.filter((item) => {
-      if (!item?.id || seenIds.has(item.id) || seenCanonical.has(item.canonicalId)) {
-        return false;
+    try {
+      const network = await fetchCitationNetworkAndRelated({
+        paperId,
+        canonicalId: canonicalId || doi || title,
+        title: title || canonicalId,
+        doi,
+        arxivId,
+        pmid,
+        domain,
+      });
+      if (network.nodes.length > 1) {
+        setCachedResponse(cacheKey, network, 1000 * 60 * 30);
       }
-      seenIds.add(item.id);
-      seenCanonical.add(item.canonicalId);
-      return true;
+      res.json(network);
+    } catch (err: any) {
+      res.status(500).json({
+        error: err.message || 'Failed to build citation network graph.',
+      });
+    }
+  });
+
+  // 2A-2. Configured Research Providers Metadata & Key Status (/api/discover/providers)
+  app.get('/api/discover/providers', (_req, res) => {
+    res.json({
+      providers: [
+        {
+          id: 'openalex',
+          name: 'OpenAlex',
+          discipline: 'Multidisciplinary (250M+ Works)',
+          endpoint: 'https://api.openalex.org/works',
+          requiresKey: false,
+          keyEnvVar: 'OPENALEX_API_KEY',
+          keyConfigured: Boolean(process.env.OPENALEX_API_KEY),
+        },
+        {
+          id: 'semanticscholar',
+          name: 'Semantic Scholar',
+          discipline: 'Scholarly Graph & Citations',
+          endpoint: 'https://api.semanticscholar.org/graph/v1/paper/search',
+          requiresKey: false,
+          keyEnvVar: 'SEMANTIC_SCHOLAR_API_KEY',
+          keyConfigured: Boolean(process.env.SEMANTIC_SCHOLAR_API_KEY),
+        },
+        {
+          id: 'arxiv',
+          name: 'arXiv',
+          discipline: 'Physics, Math, CS, Quantitative Bio & Econ Preprints',
+          endpoint: 'https://export.arxiv.org/api/query',
+          requiresKey: false,
+          keyConfigured: true,
+        },
+        {
+          id: 'europepmc',
+          name: 'Europe PMC',
+          discipline: 'Biomedical & Life Sciences Literature',
+          endpoint: 'https://www.ebi.ac.uk/europepmc/webservices/rest/search',
+          requiresKey: false,
+          keyConfigured: true,
+        },
+        {
+          id: 'pubmed',
+          name: 'PubMed / NCBI',
+          discipline: 'MEDLINE & Biomedical Citations',
+          endpoint: 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi',
+          requiresKey: false,
+          keyEnvVar: 'NCBI_API_KEY',
+          keyConfigured: Boolean(process.env.NCBI_API_KEY),
+        },
+        {
+          id: 'doaj',
+          name: 'DOAJ',
+          discipline: 'Directory of Open Access Journals',
+          endpoint: 'https://doaj.org/api/search/articles/',
+          requiresKey: false,
+          keyConfigured: true,
+        },
+        {
+          id: 'core',
+          name: 'CORE',
+          discipline: 'Repository-Hosted Open Access Research',
+          endpoint: 'https://api.core.ac.uk/v3/search/works',
+          requiresKey: true,
+          keyEnvVar: 'CORE_API_KEY',
+          keyConfigured: Boolean(process.env.CORE_API_KEY),
+        },
+        {
+          id: 'repec',
+          name: 'RePEc / IDEAS',
+          discipline: 'Economics Working Papers & Articles',
+          endpoint: 'https://api.openalex.org/works (RePEc S4306401271)',
+          requiresKey: false,
+          keyConfigured: true,
+        },
+        {
+          id: 'ssrn',
+          name: 'SSRN',
+          discipline: 'Social Science & Policy Research',
+          endpoint: 'https://api.crossref.org/works?filter=prefix:10.2139',
+          requiresKey: false,
+          keyConfigured: true,
+        },
+        {
+          id: 'paperswithcode',
+          name: 'Papers with Code',
+          discipline: 'ML Papers & Linked GitHub Repositories',
+          endpoint: 'https://huggingface.co/api/papers/search',
+          requiresKey: false,
+          keyConfigured: true,
+        },
+      ],
     });
-
-    const payload = { items: uniqueResults, sourcesChecked, retrievedAt };
-    setCachedResponse(cacheKey, payload);
-    res.json(payload);
   });
 
   // 2B. Live GitHub Repository Discovery (/api/github/discover with pagination)

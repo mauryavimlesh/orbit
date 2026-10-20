@@ -51,6 +51,7 @@ interface GitHubExplorerViewProps {
     watch: Omit<WatchlistItem, 'id' | 'lastCheckedAt' | 'lastStatus' | 'updates'>
   ) => void;
   onBackToDiscover?: () => void;
+  initialInspectRepo?: string | null;
 }
 
 const GITHUB_TOPIC_PRESETS = [
@@ -84,6 +85,7 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
   onAskProfessorAboutRepo,
   onAddWatch,
   onBackToDiscover,
+  initialInspectRepo,
 }) => {
   // Explorer filters & query state
   const [searchQuery, setSearchQuery] = useState('');
@@ -325,6 +327,12 @@ export const GitHubExplorerView: React.FC<GitHubExplorerViewProps> = ({
       setDetailLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (initialInspectRepo && initialInspectRepo.includes('/')) {
+      handleOpenDetail(initialInspectRepo);
+    }
+  }, [initialInspectRepo]);
 
   const handleSaveAndBookmark = (repoItem: GitHubCatalogRepoItem | GitHubRepoAnalysis) => {
     let analysis: GitHubRepoAnalysis;

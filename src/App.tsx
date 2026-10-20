@@ -11,7 +11,9 @@ import {
   GitHubRepoAnalysis,
   KnowledgeEdge,
   MasteryRecord,
+  ProviderStatusReport,
   QuotaStatus,
+  ResearchProviderId,
   StructuredNote,
   WatchlistItem,
 } from './types/orbit';
@@ -29,6 +31,7 @@ import { NotesDocumentView } from './components/NotesDocumentView';
 import { FloatingProfessorAgent } from './components/FloatingProfessorAgent';
 import { HomepageGitHubSection } from './components/HomepageGitHubSection';
 import { GitHubExplorerView } from './components/GitHubExplorerView';
+import { LatexTextRenderer } from './components/MathFormulaBlock';
 import {
   Search,
   Bell,
@@ -196,11 +199,16 @@ export default function App() {
   const [isSearchingLive, setIsSearchingLive] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [liveSearchSourceSummary, setLiveSearchSourceSummary] = useState<string | null>(null);
+  const [providerReports, setProviderReports] = useState<ProviderStatusReport[]>([]);
+  const [duplicatesMergedCount, setDuplicatesMergedCount] = useState<number>(0);
+  const [selectedProviders, setSelectedProviders] = useState<ResearchProviderId[]>([]);
+  const [yearFilter, setYearFilter] = useState<'all' | '2025-2026' | '2024-2026' | '2020-2026'>('all');
+  const [initialInspectRepo, setInitialInspectRepo] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [domainFilter, setDomainFilter] = useState<string>('All');
   const [evidenceFilter, setEvidenceFilter] = useState<string>('All');
   const [fullTextOnly, setFullTextOnly] = useState<boolean>(false);
-  const [sortBy, setSortBy] = useState<'relevance' | 'newest' | 'peer_reviewed'>('relevance');
+  const [sortBy, setSortBy] = useState<'relevance' | 'newest' | 'citations' | 'peer_reviewed'>('relevance');
   const [visibleCount, setVisibleCount] = useState<number>(8);
 
   // User Learning & Personalization State
@@ -396,8 +404,14 @@ export default function App() {
     [activeCategoryId]
   );
 
-  // Live Multi-Source Search Handler (OpenAlex + arXiv)
-  const runLiveSearchQuery = async (rawQuery: string, explicitDomain?: string) => {
+  // Live Multi-Source Search Handler (10 Academic & Open-Source Research Providers)
+  const runLiveSearchQuery = async (
+    rawQuery: string,
+    explicitDomain?: string,
+    overrideProviders?: ResearchProviderId[],
+    overrideSort?: 'relevance' | 'newest' | 'citations' | 'peer_reviewed',
+    overrideYearFilter?: 'all' | '2025-2026' | '2024-2026' | '2020-2026'
+  ) => {
     const q = rawQuery.trim();
     if (!q) {
       setLiveSearchSourceSummary(null);
@@ -413,22 +427,59 @@ export default function App() {
       const domainParam =
         explicitDomain ||
         (activeCategoryObj ? activeCategoryObj.domains[0] : domainFilter !== 'All' ? domainFilter : '');
-      const url = `/api/discover/search?q=${encodeURIComponent(q)}${
-        domainParam ? `&domain=${encodeURIComponent(domainParam)}` : ''
-      }`;
-      const res = await fetch(url);
+      const effectiveProviders =
+        overrideProviders ??
+        (selectedProviders.length > 0
+          ? selectedProviders
+          : activeCategoryObj?.defaultProviders || []);
+      const effectiveSort = overrideSort || sortBy;
+      const effectiveYear = overrideYearFilter || yearFilter;
+
+      const params = new URLSearchParams();
+      params.set('q', q);
+      if (domainParam) params.set('domain', domainParam);
+      if (effectiveProviders.length > 0) {
+        params.set('providers', effectiveProviders.join(','));
+      }
+      if (effectiveSort === 'newest') {
+        params.set('sort', 'newest');
+      } else if (effectiveSort === 'citations') {
+        params.set('sort', 'citations');
+      } else {
+        params.set('sort', 'relevance');
+      }
+      if (effectiveYear === '2025-2026') {
+        params.set('yearFrom', '2025');
+        params.set('yearTo', '2026');
+      } else if (effectiveYear === '2024-2026') {
+        params.set('yearFrom', '2024');
+        params.set('yearTo', '2026');
+      } else if (effectiveYear === '2020-2026') {
+        params.set('yearFrom', '2020');
+        params.set('yearTo', '2026');
+      }
+      if (fullTextOnly) {
+        params.set('openAccessOnly', 'true');
+      }
+
+      const res = await fetch(`/api/discover/search?${params.toString()}`);
       const data = await res.json();
       if (res.ok && Array.isArray(data.items)) {
+        if (Array.isArray(data.providerReports)) {
+          setProviderReports(data.providerReports);
+        }
+        setDuplicatesMergedCount(Number(data.duplicatesMerged || 0));
+
         if (data.items.length > 0) {
           setDiscoveries((prev) => sanitizeAndDedupeDiscoveries([...data.items, ...prev]));
           setLiveSearchSourceSummary(
-            `Retrieved ${data.items.length} live papers from ${
-              data.sourcesChecked?.join(' & ') || 'OpenAlex & arXiv'
+            `Retrieved ${data.items.length} unique papers across ${
+              data.sourcesChecked?.join(', ') || 'multi-source databases'
             } for "${q}"`
           );
         } else {
           setLiveSearchSourceSummary(
-            `No live external matches found in OpenAlex/arXiv for "${q}". Showing matching local library papers.`
+            `No live external matches found in selected sources for "${q}". Showing matching local library papers.`
           );
         }
       } else {
@@ -456,11 +507,32 @@ export default function App() {
     if (categoryId !== 'all') {
       const catObj = RESEARCH_CATEGORIES.find((c) => c.id === categoryId);
       if (catObj && catObj.liveSearchQuery) {
+        if (catObj.id === 'latest_2025_2026') {
+          setYearFilter('2025-2026');
+          setSortBy('newest');
+          runLiveSearchQuery(
+            catObj.liveSearchQuery,
+            undefined,
+            catObj.defaultProviders,
+            'newest',
+            '2025-2026'
+          );
+          return;
+        }
         const count = discoveries.filter((d) =>
           catObj.domains.includes(d.domain)
         ).length;
-        if (count < 2) {
-          runLiveSearchQuery(catObj.liveSearchQuery, catObj.domains[0]);
+        if (count < 3) {
+          runLiveSearchQuery(
+            catObj.liveSearchQuery,
+            catObj.domains[0],
+            catObj.defaultProviders,
+            catObj.defaultSort === 'newest'
+              ? 'newest'
+              : catObj.defaultSort === 'citations'
+              ? 'citations'
+              : 'relevance'
+          );
         }
       }
     }
@@ -468,11 +540,28 @@ export default function App() {
 
   const filteredDiscoveries = useMemo(() => {
     const filtered = discoveries.filter((d) => {
-      if (activeCategoryObj) {
+      if (activeCategoryObj && activeCategoryObj.id !== 'latest_2025_2026') {
         if (!activeCategoryObj.domains.includes(d.domain)) return false;
       }
       if (domainFilter !== 'All' && d.domain !== domainFilter) return false;
       if (evidenceFilter !== 'All' && d.evidenceStatus !== evidenceFilter) return false;
+      if (selectedProviders.length > 0) {
+        const pMatch =
+          (d.primaryProvider && selectedProviders.includes(d.primaryProvider)) ||
+          selectedProviders.some((pid) =>
+            d.sourceName.toLowerCase().includes(pid.replace('semanticscholar', 'semantic')) ||
+            (d.contributingSources || []).some((cs) =>
+              cs.toLowerCase().includes(pid.replace('semanticscholar', 'semantic'))
+            )
+          );
+        if (!pMatch) return false;
+      }
+      if (yearFilter !== 'all') {
+        const pubYear = d.publicationYear || Number(d.publishedAt?.slice(0, 4)) || 2025;
+        if (yearFilter === '2025-2026' && pubYear < 2025) return false;
+        if (yearFilter === '2024-2026' && pubYear < 2024) return false;
+        if (yearFilter === '2020-2026' && pubYear < 2020) return false;
+      }
       if (fullTextOnly) {
         const hasFull =
           d.fullTextAvailable !== undefined
@@ -500,13 +589,26 @@ export default function App() {
     if (sortBy === 'newest') {
       return [...filtered].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
     }
+    if (sortBy === 'citations') {
+      return [...filtered].sort((a, b) => (b.citationCount || 0) - (a.citationCount || 0));
+    }
     if (sortBy === 'peer_reviewed') {
       return [...filtered].sort((a, b) =>
         a.evidenceStatus === 'Peer-Reviewed' && b.evidenceStatus !== 'Peer-Reviewed' ? -1 : 1
       );
     }
     return filtered;
-  }, [discoveries, activeCategoryObj, domainFilter, evidenceFilter, fullTextOnly, searchQuery, sortBy]);
+  }, [
+    discoveries,
+    activeCategoryObj,
+    domainFilter,
+    evidenceFilter,
+    selectedProviders,
+    yearFilter,
+    fullTextOnly,
+    searchQuery,
+    sortBy,
+  ]);
 
   const featuredHeroItem = discoveries[heroIndex % discoveries.length] || SEED_DISCOVERIES[0];
 
@@ -1546,6 +1648,105 @@ export default function App() {
                   )}
                 </div>
 
+                {/* MULTI-SOURCE RESEARCH PROVIDER FILTER BAR (10 Real Providers) */}
+                <div className="space-y-2 pt-1 border-t border-white/10">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="text-white/60 font-medium">
+                      Research Databases &amp; Preprint Sources (Click to filter or target live query):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {(
+                        [
+                          { id: 'all', label: 'All Years' },
+                          { id: '2025-2026', label: '2025–2026 Latest' },
+                          { id: '2024-2026', label: '2024–2026' },
+                          { id: '2020-2026', label: '2020–2026' },
+                        ] as const
+                      ).map((yr) => (
+                        <button
+                          key={yr.id}
+                          type="button"
+                          onClick={() => {
+                            setYearFilter(yr.id);
+                            if (searchQuery.trim() || activeCategoryObj) {
+                              runLiveSearchQuery(
+                                searchQuery.trim() || activeCategoryObj?.liveSearchQuery || 'recent breakthroughs',
+                                activeCategoryObj?.domains[0],
+                                undefined,
+                                yr.id === '2025-2026' ? 'newest' : undefined,
+                                yr.id
+                              );
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-mono transition-colors cursor-pointer ${
+                            yearFilter === yr.id
+                              ? 'bg-emerald-400 text-[#0B0A0E] font-bold'
+                              : 'bg-white/[0.05] text-white/70 hover:text-white'
+                          }`}
+                        >
+                          {yr.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProviders([])}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
+                        selectedProviders.length === 0
+                          ? 'bg-white text-[#0B0A0E] font-bold shadow-sm'
+                          : 'bg-white/[0.05] text-white/75 hover:bg-white/[0.12] hover:text-white'
+                      }`}
+                    >
+                      All 10 Sources
+                    </button>
+                    {(
+                      [
+                        { id: 'openalex', label: 'OpenAlex' },
+                        { id: 'semanticscholar', label: 'Semantic Scholar' },
+                        { id: 'arxiv', label: 'arXiv' },
+                        { id: 'europepmc', label: 'Europe PMC' },
+                        { id: 'pubmed', label: 'PubMed / NCBI' },
+                        { id: 'doaj', label: 'DOAJ' },
+                        { id: 'core', label: 'CORE' },
+                        { id: 'repec', label: 'RePEc / IDEAS' },
+                        { id: 'ssrn', label: 'SSRN' },
+                        { id: 'paperswithcode', label: 'Papers with Code' },
+                      ] as Array<{ id: ResearchProviderId; label: string }>
+                    ).map((prov) => {
+                      const active = selectedProviders.includes(prov.id);
+                      return (
+                        <button
+                          key={prov.id}
+                          type="button"
+                          onClick={() => {
+                            const next = active
+                              ? selectedProviders.filter((p) => p !== prov.id)
+                              : [...selectedProviders, prov.id];
+                            setSelectedProviders(next);
+                            const qToRun =
+                              searchQuery.trim() ||
+                              activeCategoryObj?.liveSearchQuery ||
+                              'breakthrough research';
+                            if (next.length > 0) {
+                              runLiveSearchQuery(qToRun, activeCategoryObj?.domains[0], next);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer border ${
+                            active
+                              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-200 font-semibold'
+                              : 'bg-white/[0.04] border-white/10 text-white/75 hover:bg-white/[0.1] hover:text-white'
+                          }`}
+                        >
+                          {prov.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Helpful Search Suggestions */}
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <span className="text-white/50">Try searching:</span>
@@ -1553,7 +1754,8 @@ export default function App() {
                     'Quantum error correction',
                     'CRISPR prime editing',
                     'FlashAttention transformer',
-                    'JWST exoplanet atmosphere',
+                    'Monetary policy inflation RePEc',
+                    'Democratic backsliding electoral governance',
                     '3D Gaussian splatting',
                   ].map((suggestion) => (
                     <button
@@ -1569,7 +1771,10 @@ export default function App() {
                     </button>
                   ))}
 
-                  {(isSearchOrFilterActive || activeCategoryId !== 'all') && (
+                  {(isSearchOrFilterActive ||
+                    activeCategoryId !== 'all' ||
+                    selectedProviders.length > 0 ||
+                    yearFilter !== 'all') && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1577,8 +1782,11 @@ export default function App() {
                         setActiveCategoryId('all');
                         setDomainFilter('All');
                         setEvidenceFilter('All');
+                        setSelectedProviders([]);
+                        setYearFilter('all');
                         setFullTextOnly(false);
                         setLiveSearchSourceSummary(null);
+                        setProviderReports([]);
                         setSearchError(null);
                       }}
                       className="px-3 py-1 rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors text-[11px] font-medium"
@@ -1603,17 +1811,20 @@ export default function App() {
                       >
                         <option value="All">All Fields</option>
                         <option value="AI & Computing">AI &amp; Machine Learning</option>
-                        <option value="Quantum & Physics">Science &amp; Physics</option>
+                        <option value="Quantum & Physics">Physics &amp; Quantum</option>
                         <option value="Biomedicine & Genomics">Medicine &amp; Biomedical</option>
                         <option value="Civil & Computer Engineering">
                           Civil &amp; Computer Engineering
                         </option>
+                        <option value="Political Science">Political Science</option>
+                        <option value="Economics">Economics &amp; Finance</option>
+                        <option value="Social Sciences">Social Sciences</option>
                         <option value="Space & Astronomy">Space &amp; Astronomy</option>
                         <option value="Clean Tech & Public Service">
                           Climate &amp; Clean Tech
                         </option>
                         <option value="Mathematics">Mathematics</option>
-                        <option value="Startups & Policy">Economics &amp; World Affairs</option>
+                        <option value="Startups & Policy">Policy &amp; Governance</option>
                         <option value="Open-Source & DevTools">Open-Source &amp; DevTools</option>
                       </select>
                     </div>
@@ -1628,7 +1839,7 @@ export default function App() {
                         <option value="All">All Publication Types</option>
                         <option value="Peer-Reviewed">Peer-Reviewed Journals Only</option>
                         <option value="Preprint / Not Yet Peer-Reviewed">
-                          Preprints (arXiv / bioRxiv)
+                          Preprints &amp; Working Papers (arXiv / SSRN / RePEc)
                         </option>
                         <option value="Working Open-Source Code">Open-Source Repositories</option>
                       </select>
@@ -1642,8 +1853,9 @@ export default function App() {
                         className="w-full px-3.5 py-2 rounded-xl bg-black/50 border border-white/15 text-white focus:outline-none"
                       >
                         <option value="relevance">Relevance</option>
-                        <option value="peer_reviewed">Peer-Reviewed First</option>
                         <option value="newest">Newest Publication Date</option>
+                        <option value="citations">Most Cited</option>
+                        <option value="peer_reviewed">Peer-Reviewed First</option>
                       </select>
                     </div>
 
@@ -1661,13 +1873,50 @@ export default function App() {
                   </div>
                 )}
 
-                {/* Live Search Status or Error Banner */}
+                {/* Live Multi-Provider Search Status & Provider Diagnostics Banner */}
                 {liveSearchSourceSummary && (
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-between gap-2 text-xs text-emerald-200">
-                    <span>{liveSearchSourceSummary}</span>
-                    <span className="text-white/60">
-                      Showing {filteredDiscoveries.length} matching papers
-                    </span>
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 space-y-2.5 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-emerald-200">
+                      <span className="font-medium">{liveSearchSourceSummary}</span>
+                      <span className="text-white/70 font-mono text-[11px]">
+                        Showing {filteredDiscoveries.length} matching papers
+                        {duplicatesMergedCount > 0
+                          ? ` · ${duplicatesMergedCount} cross-source duplicates merged`
+                          : ''}
+                      </span>
+                    </div>
+
+                    {providerReports.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-emerald-500/15">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-white/45 mr-1">
+                          Provider Status:
+                        </span>
+                        {providerReports.map((rep) => (
+                          <span
+                            key={rep.providerId}
+                            title={rep.message || `${rep.endpointUsed} (${rep.latencyMs}ms)`}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-mono inline-flex items-center gap-1 ${
+                              rep.status === 'ok' && rep.count > 0
+                                ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/30'
+                                : rep.status === 'rate_limited' || rep.status === 'requires_key'
+                                ? 'bg-amber-500/15 text-amber-200 border border-amber-500/25'
+                                : 'bg-white/[0.05] text-white/50 border border-white/10'
+                            }`}
+                          >
+                            <span>{rep.providerName}:</span>
+                            <strong>
+                              {rep.status === 'ok'
+                                ? `${rep.count} papers`
+                                : rep.status === 'rate_limited'
+                                ? 'rate-limited'
+                                : rep.status === 'requires_key'
+                                ? 'optional key'
+                                : '0'}
+                            </strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1772,6 +2021,16 @@ export default function App() {
                             <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-200 text-[11px]">
                               {paper.domain}
                             </span>
+                            {typeof paper.citationCount === 'number' && paper.citationCount > 0 && (
+                              <span className="px-2 py-0.5 rounded-full bg-white/[0.05] text-[11px] font-mono text-white/75">
+                                {paper.citationCount.toLocaleString()} citations
+                              </span>
+                            )}
+                            {paper.contributingSources && paper.contributingSources.length > 1 && (
+                              <span className="px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-[10px] font-mono text-violet-200">
+                                Verified across {paper.contributingSources.join(' + ')}
+                              </span>
+                            )}
                           </div>
 
                           <span
@@ -1793,18 +2052,30 @@ export default function App() {
                           >
                             {paper.title}
                           </h3>
-                          <div className="text-xs text-white/65">
-                            <span className="text-white/45">Authors: </span>
-                            {paper.authors && paper.authors.length > 0
-                              ? paper.authors.join(', ')
-                              : 'Authors listed on primary source'}
+                          <div className="text-xs text-white/65 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span>
+                              <span className="text-white/45">Authors: </span>
+                              {paper.authors && paper.authors.length > 0
+                                ? paper.authors.join(', ')
+                                : 'Authors listed on primary source'}
+                            </span>
+                            {paper.doi && (
+                              <span className="font-mono text-[11px] text-white/45">
+                                DOI: {paper.doi}
+                              </span>
+                            )}
+                            {paper.arxivId && (
+                              <span className="font-mono text-[11px] text-amber-300/80">
+                                arXiv:{paper.arxivId}
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Readable Abstract / Summary */}
-                        <p className="text-sm text-[#E4E2DC] leading-relaxed line-clamp-3 max-w-[85ch]">
-                          {paper.readerLayers.quickOrientation}
-                        </p>
+                        {/* Readable Abstract / Summary with Inline LaTeX Support */}
+                        <div className="text-sm text-[#E4E2DC] leading-relaxed line-clamp-3 max-w-[85ch]">
+                          <LatexTextRenderer text={paper.readerLayers.quickOrientation} />
+                        </div>
 
                         {/* Action Bar: Read Paper | Explain | Create Notes | Save | Original Source */}
                         <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
@@ -1949,6 +2220,7 @@ export default function App() {
             }}
             onAddWatch={handleAddWatch}
             onBackToDiscover={() => setActiveSection('discover')}
+            initialInspectRepo={initialInspectRepo}
           />
         )}
 
@@ -2028,8 +2300,19 @@ export default function App() {
           onToggleBookmark={handleToggleBookmark}
           allDiscoveries={discoveries}
           onSelectDiscovery={(paper) => {
+            setDiscoveries((prev) => sanitizeAndDedupeDiscoveries([paper, ...prev]));
             setActiveWorkspaceItem(paper);
             setActiveWorkspaceTab('reader');
+          }}
+          onTriggerGlobalSearch={(q) => {
+            setActiveWorkspaceItem(null);
+            setSearchQuery(q);
+            runLiveSearchQuery(q);
+          }}
+          onOpenRepoInExplorer={(repoFullName) => {
+            setActiveWorkspaceItem(null);
+            setInitialInspectRepo(repoFullName);
+            setActiveSection('repositories');
           }}
         />
       )}
