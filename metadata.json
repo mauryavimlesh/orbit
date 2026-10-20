@@ -1,0 +1,6 @@
+{
+  "name": "ORBIT — Global Discovery-to-Mastery Learning System",
+  "description": "Discover research papers, inventions, open-source repositories, and global developments. Understand them deeply through layered explanations, interactive visual labs, approval-gated notes, and longitudinal topic watches.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
