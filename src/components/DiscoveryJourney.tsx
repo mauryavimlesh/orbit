@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import type { DiscoveryItem } from '../types/orbit';
 
-export interface JourneyActivity { readPercent: number; quizAttempts: number; lastOpenedAt: string; }
+import { chooseNextLearningStep, recommendDiscoveries, summarizeJourney } from '../lib/journey';
+import type { JourneyActivity } from '../lib/journey';
 import { ArrowRight, BookOpen, Check, Compass, GraduationCap } from 'lucide-react';
 
 const INTERESTS_KEY = 'orbit_v1_journey_interests';
@@ -32,27 +33,12 @@ export const DiscoveryJourney: React.FC<Props> = ({
 }) => {
   const [interests, setInterests] = useState<string[]>(loadInterests);
   const domains = useMemo(() => Array.from(new Set(discoveries.map((item) => item.domain))).slice(0, 12), [discoveries]);
-  const visitedIds = useMemo(() => Object.keys(activity), [activity]);
-  const readCount = Object.values(activity).filter((record) => record.readPercent >= 80).length;
-  const practicedCount = Object.values(activity).filter((record) => record.quizAttempts > 0).length;
-  const continueId = visitedIds
-    .filter((id) => activity[id].readPercent < 80)
-    .sort((a, b) => Date.parse(activity[b].lastOpenedAt) - Date.parse(activity[a].lastOpenedAt))[0];
-  const continueRecord = continueId ? activity[continueId] : null;
-  const continuePaper = continueId && discoveries.find((paper) => paper.id === continueId);
-
-  const recommended = useMemo(() => {
-    const candidates = discoveries.filter((item) => !visitedIds.includes(item.id));
-    return candidates
-      .map((item, index) => ({
-        item, index,
-        score: (interests.includes(item.domain) ? 10 : 0)
-          + (bookmarkedIds.includes(item.id) ? 3 : 0)
-          + (item.evidenceStatus === 'Peer-Reviewed' ? 1 : 0),
-      }))
-      .sort((a, b) => b.score - a.score || a.index - b.index)
-      .slice(0, 3).map(({item}) => item);
-  }, [discoveries, visitedIds, interests, bookmarkedIds]);
+  const metrics = useMemo(() => summarizeJourney(activity), [activity]);
+  const nextStep = useMemo(() => chooseNextLearningStep(discoveries, activity), [discoveries, activity]);
+  const recommended = useMemo(
+    () => recommendDiscoveries(discoveries, activity, interests, bookmarkedIds),
+    [discoveries, activity, interests, bookmarkedIds]
+  );
 
   const toggleInterest = (domain: string) => {
     const next = interests.includes(domain)
@@ -68,7 +54,7 @@ export const DiscoveryJourney: React.FC<Props> = ({
         <div className="space-y-1">
           <span className="text-[11px] uppercase tracking-wider text-emerald-300 font-mono">Your discovery journey</span>
           <h2 id="orbit-journey-title" className="font-display text-xl sm:text-2xl font-bold text-white">
-            {visitedIds.length ? 'Continue learning at your pace' : 'Find your first discovery'}
+            {metrics.explored ? 'Continue learning at your pace' : 'Find your first discovery'}
           </h2>
           <p className="text-xs sm:text-sm text-white/70 max-w-2xl">
             Pick a few interests, open something fascinating, then practice when you're ready. No streak pressure.
@@ -104,9 +90,9 @@ export const DiscoveryJourney: React.FC<Props> = ({
 
       <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-label="Your actual learning activity">
         {[
-          { label: 'Explored', value: visitedIds.length, help: 'Topics you opened' },
-          { label: 'Read 80%+', value: readCount, help: 'Topics you read most of' },
-          { label: 'Practiced', value: practicedCount, help: 'Topics with a quiz attempt' },
+          { label: 'Explored', value: metrics.explored, help: 'Topics you opened' },
+          { label: 'Read 80%+', value: metrics.read, help: 'Topics you read most of' },
+          { label: 'Practiced', value: metrics.practiced, help: 'Topics with a quiz attempt' },
         ].map((metric) => (
           <div key={metric.label} className="orbit-glass-subtle rounded-2xl p-3 sm:p-4 text-center">
             <div className="text-xl sm:text-2xl font-semibold text-white font-mono" aria-label={`${metric.value} ${metric.label}`}>{metric.value}</div>
@@ -116,16 +102,16 @@ export const DiscoveryJourney: React.FC<Props> = ({
         ))}
       </div>
 
-      {continuePaper && (
+      {nextStep && (
         <div className="orbit-glass-subtle rounded-2xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[11px] text-emerald-300 font-semibold">Pick up where you left off</div>
-            <p className="text-sm text-white font-medium line-clamp-2">{continuePaper.title}</p>
-            <p className="text-xs text-white/55">{continueRecord?.readPercent ?? 0}% read so far</p>
+            <div className="text-[11px] text-emerald-300 font-semibold">{nextStep.action === 'resume' ? 'Pick up where you left off' : 'Ready for a knowledge check'}</div>
+            <p className="text-sm text-white font-medium line-clamp-2">{nextStep.item.title}</p>
+            <p className="text-xs text-white/55">{nextStep.readPercent}% read so far</p>
           </div>
-          <button type="button" onClick={() => onOpen(continuePaper, 'reader')}
+          <button type="button" onClick={() => onOpen(nextStep.item, nextStep.action === 'practice' ? 'quiz' : 'reader')}
             className="rounded-full bg-white text-[#0B0A0E] text-xs font-bold px-4 py-2 flex items-center gap-2">
-            Resume <BookOpen className="w-4 h-4" />
+            {nextStep.action === 'practice' ? 'Practice' : 'Resume'} <BookOpen className="w-4 h-4" />
           </button>
         </div>
       )}
@@ -155,7 +141,7 @@ export const DiscoveryJourney: React.FC<Props> = ({
           </div>
         )}
       </div>
-      {visitedIds.length > 0 && practicedCount === 0 && (
+      {metrics.explored > 0 && metrics.practiced === 0 && (
         <p className="text-xs text-white/65 flex items-center gap-2">
           <GraduationCap className="w-4 h-4 text-emerald-300 shrink-0" />
           When you're ready, use a paper's quiz to check your understanding. Reading alone is not counted as mastery.
