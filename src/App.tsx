@@ -1215,6 +1215,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen relative bg-[#0B0A0F] text-[#F4F3EF] flex flex-col">
+      <a href="#orbit-main-content" className="orbit-skip-link">Skip to main content</a>
       {/* Warm Atmospheric Blurred Backdrop matching the reference */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
         <div className="absolute -top-24 -left-24 w-[540px] h-[540px] rounded-full bg-[#8E4A59]/25 blur-[130px]" />
@@ -1223,7 +1224,7 @@ export default function App() {
       </div>
 
       {/* Main Framed Glassmorphic Container */}
-      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col gap-5">
+      <div id="orbit-main-content" tabIndex={-1} className="relative z-10 w-full max-w-[1440px] mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col gap-5">
         {/* TOP HORIZONTAL NAVIGATION BAR (Simple, Predictable 3-Destination Architecture) */}
         <header className="flex flex-wrap items-center justify-between gap-4">
           {/* Upper-Left Prominent Glass Search Field */}
@@ -1234,6 +1235,7 @@ export default function App() {
             <Search className="w-4 h-4 text-white/60 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               ref={searchInputRef}
+               aria-label="Search papers, topics, authors, or DOI"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -1287,6 +1289,7 @@ export default function App() {
                 <button
                   key={nav.id}
                   onClick={() => setActiveSection(nav.id as NavSection)}
+                   aria-current={isActive ? 'page' : undefined}
                   className={`px-5 py-2 rounded-full text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 ${
                     isActive
                       ? 'orbit-glass-pill-active text-white font-semibold shadow-sm'
@@ -1323,6 +1326,8 @@ export default function App() {
                 setShowProfileDropdown(false);
               }}
               aria-label="Followed topic updates"
+               aria-expanded={showNotifDropdown}
+               aria-controls="orbit-topic-updates"
               className="w-10 h-10 rounded-full orbit-glass-pill flex items-center justify-center text-white/85 hover:text-white hover:bg-white/20 transition-colors relative"
             >
               <Bell className="w-4 h-4" />
@@ -1333,7 +1338,10 @@ export default function App() {
                 setShowProfileDropdown((prev) => !prev);
                 setShowNotifDropdown(false);
               }}
-              className="pl-2 pr-3.5 py-1.5 rounded-full orbit-glass-pill flex items-center gap-2.5 hover:bg-white/15 transition-colors text-left"
+              aria-label="Reading and explanation preferences"
+               aria-expanded={showProfileDropdown}
+               aria-controls="orbit-reading-preferences"
+               className="pl-2 pr-3.5 py-1.5 rounded-full orbit-glass-pill flex items-center gap-2.5 hover:bg-white/15 transition-colors text-left"
             >
               <div className="w-7 h-7 rounded-full bg-white/90 text-[#0B0A0E] flex items-center justify-center text-xs font-bold">
                 OS
@@ -1349,7 +1357,7 @@ export default function App() {
 
             {/* Followed Topics Alerts Dropdown */}
             {showNotifDropdown && (
-              <div className="absolute right-0 top-12 w-80 orbit-glass-panel rounded-2xl p-4 z-40 space-y-3 border border-white/15">
+              <div id="orbit-topic-updates" className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] orbit-glass-panel rounded-2xl p-4 z-40 space-y-3 border border-white/15">
                 <div className="flex items-center justify-between text-xs font-semibold text-white">
                   <span>Followed Topic Updates</span>
                   <button
@@ -1379,7 +1387,7 @@ export default function App() {
 
             {/* Reading & Explanation Preferences Dropdown */}
             {showProfileDropdown && (
-              <div className="absolute right-0 top-12 w-80 orbit-glass-panel rounded-2xl p-4 z-40 space-y-4 border border-white/15 text-xs">
+              <div id="orbit-reading-preferences" className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] orbit-glass-panel rounded-2xl p-4 z-40 space-y-4 border border-white/15 text-xs">
                 <div>
                   <span className="font-semibold text-white block">
                     Reading &amp; Explanation Preferences
@@ -1814,7 +1822,8 @@ export default function App() {
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search topics, titles, authors, DOI, or arXiv ID across 10 research databases..."
+                      aria-label="Search research by topic, title, author, DOI, or arXiv ID"
+                       placeholder="Search topics, titles, authors, DOI, or arXiv ID across 10 research databases..."
                       className="w-full pl-11 pr-9 py-2.5 rounded-2xl bg-black/45 border border-white/15 text-xs sm:text-sm text-white placeholder:text-white/45 focus:outline-none focus:border-white/40"
                     />
                     {searchQuery && (
