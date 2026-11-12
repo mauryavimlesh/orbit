@@ -2614,6 +2614,13 @@ export default function App() {
           />
         )}
 
+        {(activeSection === 'library' || activeSection === 'notes') && (
+          <p className="orbit-glass-subtle rounded-2xl px-4 py-3 text-xs text-white/75 leading-relaxed">
+            Your notes, bookmarks, and learning progress are saved in this browser only.
+            They do not sync between devices and may be lost if you clear browser data.
+          </p>
+        )}
+
         {/* DESTINATION 2: MY LIBRARY (Saved Papers, Reading Progress, D3 Concept Map, Followed Topics & Open-Source Tools) */}
         {activeSection === 'library' && (
           <MyLearningView
