@@ -30,6 +30,8 @@ import { MyLearningView } from './components/MyLearningView';
 import { NotesDocumentView } from './components/NotesDocumentView';
 import { FloatingProfessorAgent } from './components/FloatingProfessorAgent';
 import { HomepageGitHubSection } from './components/HomepageGitHubSection';
+import { DiscoveryJourney } from './components/DiscoveryJourney';
+import type { JourneyActivity } from './components/DiscoveryJourney';
 import { GitHubExplorerView } from './components/GitHubExplorerView';
 import { LatexTextRenderer } from './components/MathFormulaBlock';
 import {
@@ -65,6 +67,7 @@ const STORAGE_KEYS = {
   SCROLL_POSITIONS: 'orbit_v1_scroll_positions',
   LANG: 'orbit_v1_lang',
   DIFF: 'orbit_v1_difficulty',
+  JOURNEY: 'orbit_v1_journey_activity',
 };
 
 // Sanitize & deduplicate any list of DiscoveryItems across pages and providers using DOI, arXiv ID, PMID, canonical ID, and normalized title
@@ -206,6 +209,25 @@ export default function App() {
     }
     return sanitizeAndDedupeDiscoveries(SEED_DISCOVERIES);
   });
+
+  const [journeyActivity, setJourneyActivity] = useState<Record<string, JourneyActivity>>(() => {
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_KEYS.JOURNEY) || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+      const entries = Object.entries(parsed).filter(([id, record]) =>
+        id.length < 300 && record && typeof record === 'object' &&
+        typeof (record as JourneyActivity).lastOpenedAt === 'string' &&
+        Number.isFinite((record as JourneyActivity).readPercent) &&
+        Number.isFinite((record as JourneyActivity).quizAttempts)
+      ).slice(0, 400);
+      return Object.fromEntries(entries) as Record<string, JourneyActivity>;
+    } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_KEYS.JOURNEY, JSON.stringify(journeyActivity)); }
+    catch { /* Browser storage may be unavailable in private mode. */ }
+  }, [journeyActivity]);
 
   const [heroIndex, setHeroIndex] = useState<number>(0);
   const [sidebarSort, setSidebarSort] = useState<'Today' | 'High Evidence'>('Today');
@@ -818,6 +840,12 @@ export default function App() {
     );
     setActiveWorkspaceItem(item);
     setActiveWorkspaceTab(tab);
+    setJourneyActivity((prev) => ({
+      ...prev,
+      [item.id]: prev[item.id]
+        ? { ...prev[item.id], lastOpenedAt: new Date().toISOString() }
+        : { readPercent: 0, quizAttempts: 0, lastOpenedAt: new Date().toISOString() },
+    }));
     setMasteryRecords((prev) => {
       const exists = prev.find((r) => r.discoveryId === item.id);
       if (exists) {
@@ -864,6 +892,14 @@ export default function App() {
     progressPercent: number,
     scrollTop: number
   ) => {
+    setJourneyActivity((prev) => ({
+      ...prev,
+      [discoveryId]: {
+        readPercent: Math.max(prev[discoveryId]?.readPercent ?? 0, Math.max(0, Math.min(100, progressPercent))),
+        quizAttempts: prev[discoveryId]?.quizAttempts ?? 0,
+        lastOpenedAt: prev[discoveryId]?.lastOpenedAt ?? new Date().toISOString(),
+      },
+    }));
     setReadingScrollPositions((prev) => ({
       ...prev,
       [discoveryId]: scrollTop,
@@ -978,6 +1014,14 @@ export default function App() {
   };
 
   const handleRecordQuizResult = async (discoveryId: string, scorePercent: number) => {
+    setJourneyActivity((prev) => ({
+      ...prev,
+      [discoveryId]: {
+        readPercent: prev[discoveryId]?.readPercent ?? 0,
+        quizAttempts: (prev[discoveryId]?.quizAttempts ?? 0) + 1,
+        lastOpenedAt: prev[discoveryId]?.lastOpenedAt ?? new Date().toISOString(),
+      },
+    }));
     setMasteryRecords((prev) =>
       prev.map((r) => {
         if (r.discoveryId !== discoveryId) return r;
@@ -1404,6 +1448,15 @@ export default function App() {
         {/* DESTINATION 1: DISCOVER (Preserves the Editorial Glassmorphic Homepage + Search-Led Paper Results) */}
         {activeSection === 'discover' && (
           <div className="space-y-8 flex-1">
+            {!isSearchOrFilterActive && (
+              <DiscoveryJourney
+                discoveries={discoveries}
+                activity={journeyActivity}
+                bookmarkedIds={bookmarkedIds}
+                onOpen={(item, mode) => openWorkspace(item, mode || 'reader')}
+                onOpenLibrary={() => { setLibrarySubTab('learning_path'); setActiveSection('library'); }}
+              />
+            )}
             {/* PRESERVED HOMEPAGE 2-COLUMN SHOWCASE */}
             {!isSearchOrFilterActive && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
