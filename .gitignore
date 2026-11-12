@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Prevent new runtime database files from entering future commits.
+# The existing tracked file and Git history require separate review.
+orbit_data.sqlite
+orbit_data.sqlite-*
+*.sqlite-wal
+*.sqlite-shm
