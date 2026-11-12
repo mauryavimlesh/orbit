@@ -1495,8 +1495,9 @@ export default function App() {
                               </h3>
                             </div>
                             <button
-                              $1onClick={() => openWorkspace(item, 'reader')}
-                               $2"w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
+                              aria-label={`Read ${item.title}`}
+                               onClick={() => openWorkspace(item, 'reader')}
+                               className="w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1557,11 +1558,12 @@ export default function App() {
                             </div>
 
                             <button
-                              $1onClick={() => {
+                              aria-label={`Resume ${rec.topicTitle}`}
+                               onClick={() => {
                                  if (linked) openWorkspace(linked, 'reader');
                                  else resolveOrOpenPaperById(rec.discoveryId, rec.topicTitle, 'reader');
                                }}
-                               $2"w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
+                               className="w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1729,8 +1731,9 @@ export default function App() {
                                 e.stopPropagation();
                                 openWorkspace(card, 'notes');
                               }}
-                              $1aria-label={`Create study notes for ${card.title}`}
-                               $2"w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
+                              title="Create study notes"
+                               aria-label={`Create study notes for ${card.title}`}
+                               className="w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
                             >
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </button>
@@ -1751,8 +1754,9 @@ export default function App() {
                             </div>
 
                             <button
-                              $1onClick={(e) => { e.stopPropagation(); openWorkspace(card, 'reader'); }}
-                               $2"w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
+                              aria-label={`Read ${card.title}`}
+                               onClick={(e) => { e.stopPropagation(); openWorkspace(card, 'reader'); }}
+                               className="w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
                             >
                               <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                             </button>
