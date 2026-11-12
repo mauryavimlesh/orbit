@@ -27,17 +27,16 @@ export function chooseNextLearningStep(
   discoveries: DiscoveryItem[],
   activity: Record<string, JourneyActivity>,
 ): LearningNextStep {
-  const candidates = discoveries.flatMap((item) => {
+  const candidates: Array<{ item: DiscoveryItem; action: 'resume' | 'practice'; readPercent: number; lastOpenedAt: string }> = [];
+  for (const item of discoveries) {
     const record = activity[item.id];
-    if (!record) return [];
+    if (!record) continue;
     if (record.readPercent < 80) {
-      return [{ item, action: 'resume' as const, readPercent: record.readPercent, lastOpenedAt: record.lastOpenedAt }];
+      candidates.push({ item, action: 'resume', readPercent: record.readPercent, lastOpenedAt: record.lastOpenedAt });
+    } else if (record.quizAttempts === 0) {
+      candidates.push({ item, action: 'practice', readPercent: record.readPercent, lastOpenedAt: record.lastOpenedAt });
     }
-    if (record.quizAttempts === 0) {
-      return [{ item, action: 'practice' as const, readPercent: record.readPercent, lastOpenedAt: record.lastOpenedAt }];
-    }
-    return [];
-  });
+  }
   candidates.sort((a, b) => {
     const aTime = Date.parse(a.lastOpenedAt) || 0;
     const bTime = Date.parse(b.lastOpenedAt) || 0;
