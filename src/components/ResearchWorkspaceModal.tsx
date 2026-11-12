@@ -223,6 +223,7 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
   onTriggerGlobalSearch,
   onOpenRepoInExplorer,
 }) => {
+  const workspaceDialogRef = useRef<HTMLDivElement | null>(null);
   const [enrichedItem, setEnrichedItem] = useState<DiscoveryItem>(incomingItem);
   const item = enrichedItem;
   const [enrichmentStatus, setEnrichmentStatus] = useState<'idle' | 'loading' | 'enriched' | 'error'>('idle');
@@ -714,9 +715,31 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
     return `${fontCls} text-base sm:text-lg font-semibold text-white tracking-tight leading-snug`;
   };
 
+  // Focus stays in the modal; return keyboard users to the original trigger on close.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    workspaceDialogRef.current?.focus();
+    return () => { if (previouslyFocused?.isConnected) previouslyFocused.focus(); };
+  }, []);
+
   // Close on Escape key (syncing reading progress before closing)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab' && workspaceDialogRef.current) {
+        const dialog = workspaceDialogRef.current;
+        const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden');
+        if (focusables.length === 0) { e.preventDefault(); dialog.focus(); return; }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === dialog)) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+          e.preventDefault(); first.focus();
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         if (activeTermPopover) {
           setActiveTermPopover(null);
@@ -1196,6 +1219,8 @@ export const ResearchWorkspaceModal: React.FC<ResearchWorkspaceModalProps> = ({
           : 'items-center justify-center bg-black/80 backdrop-blur-md p-0 sm:p-4'
       } overflow-hidden`}
       role="dialog"
+      ref={workspaceDialogRef}
+      tabIndex={-1}
       aria-modal="true"
       aria-labelledby="workspace-modal-title"
     >
