@@ -274,9 +274,9 @@ export default function App() {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.NOTES);
       const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : [DEFAULT_SEED_NOTE];
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
-      return [DEFAULT_SEED_NOTE];
+      return [];
     }
   });
   const [selectedNoteIdForView, setSelectedNoteIdForView] = useState<string | null>(null);
@@ -284,16 +284,16 @@ export default function App() {
   const [masteryRecords, setMasteryRecords] = useState<MasteryRecord[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.MASTERY);
-      const parsed = raw ? JSON.parse(raw) : INITIAL_MASTERY_RECORDS;
+      const parsed = raw ? JSON.parse(raw) : [];
       // Deduplicate by discoveryId
       const seen = new Set<string>();
-      return (Array.isArray(parsed) ? parsed : INITIAL_MASTERY_RECORDS).filter((r: MasteryRecord) => {
+      return (Array.isArray(parsed) ? parsed : []).filter((r: MasteryRecord) => {
         if (!r?.discoveryId || seen.has(r.discoveryId)) return false;
         seen.add(r.discoveryId);
         return true;
       });
     } catch {
-      return INITIAL_MASTERY_RECORDS;
+      return [];
     }
   });
 
@@ -309,19 +309,19 @@ export default function App() {
   const [bookmarkedIds, setBookmarkedIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.BOOKMARKS);
-      const parsed = raw ? JSON.parse(raw) : ['disc-quantum-surface-code', 'disc-gods-eye-view'];
+      const parsed = raw ? JSON.parse(raw) : [];
       return Array.from(new Set(Array.isArray(parsed) ? parsed : []));
     } catch {
-      return ['disc-quantum-surface-code', 'disc-gods-eye-view'];
+      return [];
     }
   });
 
   const [watchlists, setWatchlists] = useState<WatchlistItem[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.WATCHLISTS);
-      return raw ? JSON.parse(raw) : INITIAL_WATCHLISTS;
+      return raw ? JSON.parse(raw) : [];
     } catch {
-      return INITIAL_WATCHLISTS;
+      return [];
     }
   });
 
@@ -865,7 +865,7 @@ export default function App() {
           topicTitle: item.title,
           domain: item.domain,
           progressPercent: 0,
-          masteryEstimate: 30,
+          masteryEstimate: 0,
           quizAttempts: 0,
           lastQuizScore: 0,
           lastStudiedAt: new Date().toISOString(),
@@ -1209,6 +1209,22 @@ export default function App() {
     sortBy,
     yearFilter,
   ]);
+
+  const resetLocalLearningData = () => {
+    const confirmed = window.confirm(
+      'Permanently clear ORBIT notes, bookmarks, progress, and discovery interests from this browser? This does not affect other devices. Export a backup from My Library first if needed.'
+    );
+    if (!confirmed) return;
+    try {
+      Object.keys(localStorage)
+        .filter((key) => key.startsWith('orbit_'))
+        .forEach((key) => localStorage.removeItem(key));
+    } catch {
+      window.alert('Browser storage could not be cleared. Check your privacy settings.');
+      return;
+    }
+    window.location.reload();
+  };
 
   const approvedNotesCount = savedNotes.filter((n) => n.status === 'approved_saved').length;
 
@@ -2668,10 +2684,15 @@ export default function App() {
         )}
 
         {(activeSection === 'library' || activeSection === 'notes') && (
-          <p className="orbit-glass-subtle rounded-2xl px-4 py-3 text-xs text-white/75 leading-relaxed">
-            Your notes, bookmarks, and learning progress are saved in this browser only.
-            They do not sync between devices and may be lost if you clear browser data.
-          </p>
+          <div className="orbit-glass-subtle rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-white/75 leading-relaxed max-w-2xl">
+              Your notes, bookmarks, and progress stay in this browser. They do not sync across devices. You can export your library as a backup before clearing anything.
+            </p>
+            <button type="button" onClick={resetLocalLearningData}
+              className="orbit-glass-pill rounded-full px-3 py-2 text-xs font-semibold text-white hover:bg-white/20 focus-visible:outline-offset-2">
+              Clear my local learning data
+            </button>
+          </div>
         )}
 
         {/* DESTINATION 2: MY LIBRARY (Saved Papers, Reading Progress, D3 Concept Map, Followed Topics & Open-Source Tools) */}
