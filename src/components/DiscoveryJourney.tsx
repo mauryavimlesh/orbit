@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import type { DiscoveryItem, MasteryRecord } from '../types/orbit';
+import type { DiscoveryItem } from '../types/orbit';
+
+export interface JourneyActivity { readPercent: number; quizAttempts: number; lastOpenedAt: string; }
 import { ArrowRight, BookOpen, Check, Compass, GraduationCap } from 'lucide-react';
 
 const INTERESTS_KEY = 'orbit_v1_journey_interests';
@@ -15,8 +17,7 @@ function loadInterests(): string[] {
 
 interface Props {
   discoveries: DiscoveryItem[];
-  masteryRecords: MasteryRecord[];
-  visitedIds: string[];
+  activity: Record<string, JourneyActivity>;
   bookmarkedIds: string[];
   onOpen: (item: DiscoveryItem, mode?: 'reader' | 'quiz') => void;
   onOpenLibrary: () => void;
@@ -27,20 +28,18 @@ interface Props {
  * simulated progress, or fabricated mastery statistics.
  */
 export const DiscoveryJourney: React.FC<Props> = ({
-  discoveries, masteryRecords, visitedIds, bookmarkedIds, onOpen, onOpenLibrary,
+  discoveries, activity, bookmarkedIds, onOpen, onOpenLibrary,
 }) => {
   const [interests, setInterests] = useState<string[]>(loadInterests);
   const domains = useMemo(() => Array.from(new Set(discoveries.map((item) => item.domain))).slice(0, 12), [discoveries]);
-  const realRecords = useMemo(
-    () => masteryRecords.filter((record) => visitedIds.includes(record.discoveryId)),
-    [masteryRecords, visitedIds]
-  );
-  const readCount = realRecords.filter((record) => record.progressPercent >= 80).length;
-  const practicedCount = realRecords.filter((record) => record.quizAttempts > 0).length;
-  const continueRecord = [...realRecords]
-    .filter((record) => record.progressPercent < 80)
-    .sort((a, b) => Date.parse(b.lastStudiedAt || '') - Date.parse(a.lastStudiedAt || ''))[0];
-  const continuePaper = continueRecord && discoveries.find((paper) => paper.id === continueRecord.discoveryId);
+  const visitedIds = useMemo(() => Object.keys(activity), [activity]);
+  const readCount = Object.values(activity).filter((record) => record.readPercent >= 80).length;
+  const practicedCount = Object.values(activity).filter((record) => record.quizAttempts > 0).length;
+  const continueId = visitedIds
+    .filter((id) => activity[id].readPercent < 80)
+    .sort((a, b) => Date.parse(activity[b].lastOpenedAt) - Date.parse(activity[a].lastOpenedAt))[0];
+  const continueRecord = continueId ? activity[continueId] : null;
+  const continuePaper = continueId && discoveries.find((paper) => paper.id === continueId);
 
   const recommended = useMemo(() => {
     const candidates = discoveries.filter((item) => !visitedIds.includes(item.id));
@@ -122,7 +121,7 @@ export const DiscoveryJourney: React.FC<Props> = ({
           <div className="min-w-0">
             <div className="text-[11px] text-emerald-300 font-semibold">Pick up where you left off</div>
             <p className="text-sm text-white font-medium line-clamp-2">{continuePaper.title}</p>
-            <p className="text-xs text-white/55">{continueRecord.progressPercent}% read so far</p>
+            <p className="text-xs text-white/55">{continueRecord?.readPercent ?? 0}% read so far</p>
           </div>
           <button type="button" onClick={() => onOpen(continuePaper, 'reader')}
             className="rounded-full bg-white text-[#0B0A0E] text-xs font-bold px-4 py-2 flex items-center gap-2">
@@ -156,7 +155,7 @@ export const DiscoveryJourney: React.FC<Props> = ({
           </div>
         )}
       </div>
-      {realRecords.length > 0 && practicedCount === 0 && (
+      {visitedIds.length > 0 && practicedCount === 0 && (
         <p className="text-xs text-white/65 flex items-center gap-2">
           <GraduationCap className="w-4 h-4 text-emerald-300 shrink-0" />
           When you're ready, use a paper's quiz to check your understanding. Reading alone is not counted as mastery.
