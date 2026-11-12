@@ -1215,6 +1215,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen relative bg-[#0B0A0F] text-[#F4F3EF] flex flex-col">
+      <a href="#orbit-main-content" className="orbit-skip-link">Skip to main content</a>
       {/* Warm Atmospheric Blurred Backdrop matching the reference */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
         <div className="absolute -top-24 -left-24 w-[540px] h-[540px] rounded-full bg-[#8E4A59]/25 blur-[130px]" />
@@ -1223,22 +1224,23 @@ export default function App() {
       </div>
 
       {/* Main Framed Glassmorphic Container */}
-      <div className="relative z-10 w-full max-w-[1440px] mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col gap-5">
+      <div id="orbit-main-content" tabIndex={-1} className="relative z-10 w-full max-w-[1440px] mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col gap-5">
         {/* TOP HORIZONTAL NAVIGATION BAR (Simple, Predictable 3-Destination Architecture) */}
         <header className="flex flex-wrap items-center justify-between gap-4">
           {/* Upper-Left Prominent Glass Search Field */}
           <form
             onSubmit={handleGlobalSearch}
-            className="w-full sm:w-80 md:w-96 lg:w-[420px] relative shrink-0"
+            className="w-full sm:w-80 md:w-96 lg:w-[420px] min-w-0 relative shrink-0"
           >
             <Search className="w-4 h-4 text-white/60 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               ref={searchInputRef}
+               aria-label="Search papers, topics, authors, or DOI"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search papers, topics, authors, or DOI (⌘K)..."
-              className="w-full pl-11 pr-24 py-2.5 rounded-full orbit-glass-pill text-xs sm:text-sm text-white placeholder:text-white/55 focus:outline-none focus:border-white/35 transition-all"
+              className="w-full min-w-0 pl-11 pr-24 py-2.5 rounded-full orbit-glass-pill text-xs sm:text-sm text-white placeholder:text-white/55 focus:outline-none focus:border-white/35 transition-all"
             />
             {searchQuery && (
               <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1268,7 +1270,7 @@ export default function App() {
           {/* Center Simplified Primary Navigation: Discover | My Library | My Notes */}
           <nav
             aria-label="Primary navigation"
-            className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1 max-w-full"
+            className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1 max-w-full min-w-0"
           >
             {[
               { id: 'discover', label: 'Discover' },
@@ -1287,6 +1289,7 @@ export default function App() {
                 <button
                   key={nav.id}
                   onClick={() => setActiveSection(nav.id as NavSection)}
+                   aria-current={isActive ? 'page' : undefined}
                   className={`px-5 py-2 rounded-full text-xs sm:text-sm font-medium transition-all whitespace-nowrap shrink-0 ${
                     isActive
                       ? 'orbit-glass-pill-active text-white font-semibold shadow-sm'
@@ -1323,6 +1326,8 @@ export default function App() {
                 setShowProfileDropdown(false);
               }}
               aria-label="Followed topic updates"
+               aria-expanded={showNotifDropdown}
+               aria-controls="orbit-topic-updates"
               className="w-10 h-10 rounded-full orbit-glass-pill flex items-center justify-center text-white/85 hover:text-white hover:bg-white/20 transition-colors relative"
             >
               <Bell className="w-4 h-4" />
@@ -1333,7 +1338,10 @@ export default function App() {
                 setShowProfileDropdown((prev) => !prev);
                 setShowNotifDropdown(false);
               }}
-              className="pl-2 pr-3.5 py-1.5 rounded-full orbit-glass-pill flex items-center gap-2.5 hover:bg-white/15 transition-colors text-left"
+              aria-label="Reading and explanation preferences"
+               aria-expanded={showProfileDropdown}
+               aria-controls="orbit-reading-preferences"
+               className="pl-2 pr-3.5 py-1.5 rounded-full orbit-glass-pill flex items-center gap-2.5 hover:bg-white/15 transition-colors text-left"
             >
               <div className="w-7 h-7 rounded-full bg-white/90 text-[#0B0A0E] flex items-center justify-center text-xs font-bold">
                 OS
@@ -1349,7 +1357,7 @@ export default function App() {
 
             {/* Followed Topics Alerts Dropdown */}
             {showNotifDropdown && (
-              <div className="absolute right-0 top-12 w-80 orbit-glass-panel rounded-2xl p-4 z-40 space-y-3 border border-white/15">
+              <div id="orbit-topic-updates" className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] orbit-glass-panel rounded-2xl p-4 z-40 space-y-3 border border-white/15">
                 <div className="flex items-center justify-between text-xs font-semibold text-white">
                   <span>Followed Topic Updates</span>
                   <button
@@ -1379,7 +1387,7 @@ export default function App() {
 
             {/* Reading & Explanation Preferences Dropdown */}
             {showProfileDropdown && (
-              <div className="absolute right-0 top-12 w-80 orbit-glass-panel rounded-2xl p-4 z-40 space-y-4 border border-white/15 text-xs">
+              <div id="orbit-reading-preferences" className="absolute right-0 top-12 w-80 max-w-[calc(100vw-2rem)] orbit-glass-panel rounded-2xl p-4 z-40 space-y-4 border border-white/15 text-xs">
                 <div>
                   <span className="font-semibold text-white block">
                     Reading &amp; Explanation Preferences
@@ -1488,7 +1496,8 @@ export default function App() {
                             </div>
                             <button
                               aria-label={`Read ${item.title}`}
-                              className="w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
+                               onClick={() => openWorkspace(item, 'reader')}
+                               className="w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1550,7 +1559,11 @@ export default function App() {
 
                             <button
                               aria-label={`Resume ${rec.topicTitle}`}
-                              className="w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
+                               onClick={() => {
+                                 if (linked) openWorkspace(linked, 'reader');
+                                 else resolveOrOpenPaperById(rec.discoveryId, rec.topicTitle, 'reader');
+                               }}
+                               className="w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1719,7 +1732,8 @@ export default function App() {
                                 openWorkspace(card, 'notes');
                               }}
                               title="Create study notes"
-                              className="w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
+                               aria-label={`Create study notes for ${card.title}`}
+                               className="w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
                             >
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </button>
@@ -1741,7 +1755,8 @@ export default function App() {
 
                             <button
                               aria-label={`Read ${card.title}`}
-                              className="w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
+                               onClick={(e) => { e.stopPropagation(); openWorkspace(card, 'reader'); }}
+                               className="w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
                             >
                               <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                             </button>
@@ -1814,7 +1829,8 @@ export default function App() {
                       type="text"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search topics, titles, authors, DOI, or arXiv ID across 10 research databases..."
+                      aria-label="Search research by topic, title, author, DOI, or arXiv ID"
+                       placeholder="Search topics, titles, authors, DOI, or arXiv ID across 10 research databases..."
                       className="w-full pl-11 pr-9 py-2.5 rounded-2xl bg-black/45 border border-white/15 text-xs sm:text-sm text-white placeholder:text-white/45 focus:outline-none focus:border-white/40"
                     />
                     {searchQuery && (
