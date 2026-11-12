@@ -1230,7 +1230,7 @@ export default function App() {
           {/* Upper-Left Prominent Glass Search Field */}
           <form
             onSubmit={handleGlobalSearch}
-            className="w-full sm:w-80 md:w-96 lg:w-[420px] relative shrink-0"
+            className="w-full sm:w-80 md:w-96 lg:w-[420px] min-w-0 relative shrink-0"
           >
             <Search className="w-4 h-4 text-white/60 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
@@ -1240,7 +1240,7 @@ export default function App() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search papers, topics, authors, or DOI (⌘K)..."
-              className="w-full pl-11 pr-24 py-2.5 rounded-full orbit-glass-pill text-xs sm:text-sm text-white placeholder:text-white/55 focus:outline-none focus:border-white/35 transition-all"
+              className="w-full min-w-0 pl-11 pr-24 py-2.5 rounded-full orbit-glass-pill text-xs sm:text-sm text-white placeholder:text-white/55 focus:outline-none focus:border-white/35 transition-all"
             />
             {searchQuery && (
               <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1">
@@ -1270,7 +1270,7 @@ export default function App() {
           {/* Center Simplified Primary Navigation: Discover | My Library | My Notes */}
           <nav
             aria-label="Primary navigation"
-            className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1 max-w-full"
+            className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto py-1 max-w-full min-w-0"
           >
             {[
               { id: 'discover', label: 'Discover' },
@@ -1495,8 +1495,8 @@ export default function App() {
                               </h3>
                             </div>
                             <button
-                              aria-label={`Read ${item.title}`}
-                              className="w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
+                              $1onClick={() => openWorkspace(item, 'reader')}
+                               $2"w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1557,8 +1557,11 @@ export default function App() {
                             </div>
 
                             <button
-                              aria-label={`Resume ${rec.topicTitle}`}
-                              className="w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
+                              $1onClick={() => {
+                                 if (linked) openWorkspace(linked, 'reader');
+                                 else resolveOrOpenPaperById(rec.discoveryId, rec.topicTitle, 'reader');
+                               }}
+                               $2"w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1726,8 +1729,8 @@ export default function App() {
                                 e.stopPropagation();
                                 openWorkspace(card, 'notes');
                               }}
-                              title="Create study notes"
-                              className="w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
+                              $1aria-label={`Create study notes for ${card.title}`}
+                               $2"w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
                             >
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </button>
@@ -1748,8 +1751,8 @@ export default function App() {
                             </div>
 
                             <button
-                              aria-label={`Read ${card.title}`}
-                              className="w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
+                              $1onClick={(e) => { e.stopPropagation(); openWorkspace(card, 'reader'); }}
+                               $2"w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
                             >
                               <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                             </button>
