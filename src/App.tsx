@@ -507,38 +507,11 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.DIFF, difficulty);
   }, [difficulty]);
 
-  // Bidirectional hydration with server SQLite database on mount
+  // No authenticated accounts: keep personal learning data on this device.
   useEffect(() => {
-    const syncWithServer = async () => {
-      try {
-        const res = await fetch('/api/library/hydrate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            notes: savedNotes,
-            liveDiscoveries: discoveries.filter((d) => d.isLiveFetched),
-            masteryRecords,
-            watchlists,
-            bookmarkedIds,
-          }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.quotaStatus) setQuotaStatus(data.quotaStatus);
-          if (Array.isArray(data.notes) && data.notes.length > savedNotes.length) {
-            setSavedNotes(data.notes);
-          }
-          if (Array.isArray(data.liveDiscoveries) && data.liveDiscoveries.length > 0) {
-            setDiscoveries((prev) =>
-              sanitizeAndDedupeDiscoveries([...data.liveDiscoveries, ...prev])
-            );
-          }
-        }
-      } catch {
-        // LocalStorage remains active if server is restarting
-      }
-    };
-    syncWithServer();
+    fetch('/api/quota/status').then((res) => res.ok ? res.json() : null)
+      .then((status) => { if (status) setQuotaStatus(status); })
+      .catch(() => { /* Browser-local learning still works when offline. */ });
   }, []);
 
   const activeCategoryObj = useMemo(
@@ -996,30 +969,12 @@ export default function App() {
   };
 
   const handleApproveAndSaveNote = async (note: StructuredNote): Promise<boolean> => {
-    setSavedNotes((prev) => {
-      const others = prev.filter((n) => n.id !== note.id);
-      return [note, ...others];
-    });
-    try {
-      const res = await fetch('/api/notes/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note }),
-      });
-      return res.ok;
-    } catch {
-      // Mirrored in localStorage
-      return true;
-    }
+    setSavedNotes((prev) => [note, ...prev.filter((n) => n.id !== note.id)]);
+    return true; // Saved in this browser by the localStorage sync effect.
   };
 
   const handleDeleteNote = async (noteId: string) => {
     setSavedNotes((prev) => prev.filter((n) => n.id !== noteId));
-    try {
-      await fetch(`/api/notes/${encodeURIComponent(noteId)}`, { method: 'DELETE' });
-    } catch {
-      // Mirrored in localStorage
-    }
   };
 
   const handleRecordQuizResult = async (discoveryId: string, scorePercent: number) => {
@@ -1476,16 +1431,20 @@ export default function App() {
                       {sidebarDiscoveries.map((item) => (
                         <div
                           key={item.id}
-                          onClick={() => openWorkspace(item, 'reader')}
                           className="group relative h-32 rounded-[20px] overflow-hidden cursor-pointer border border-white/10"
                         >
+                          <button type="button" aria-label={`Explore ${item.title}`}
+
+                            onClick={() => openWorkspace(item, 'reader')}
+
+                            className="absolute inset-0 z-10 rounded-[20px]" />
                           <EditorialArtwork
                             theme={item.artworkTheme}
                             variant="thumb"
                             className="w-full h-full transition-transform duration-300 group-hover:scale-105"
                           />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent" />
-                          <div className="absolute bottom-3 left-3.5 right-3.5 flex items-end justify-between gap-2">
+                          <div className="pointer-events-none absolute bottom-3 left-3.5 right-3.5 flex items-end justify-between gap-2">
                             <div>
                               <span className="text-[10px] text-emerald-300 font-mono block">
                                 {item.domain} · {item.evidenceStatus}
@@ -1497,7 +1456,7 @@ export default function App() {
                             <button
                               aria-label={`Read ${item.title}`}
                                onClick={() => openWorkspace(item, 'reader')}
-                               className="w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
+                               className="pointer-events-auto relative z-20 w-7 h-7 rounded-full bg-white/25 backdrop-blur-md border border-white/30 flex items-center justify-center text-white group-hover:bg-white group-hover:text-[#0B0A0E] transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1530,16 +1489,14 @@ export default function App() {
                         return (
                           <div
                             key={rec.discoveryId}
-                            onClick={() => {
-                              if (linked) {
-                                openWorkspace(linked, 'reader');
-                              } else {
-                                resolveOrOpenPaperById(rec.discoveryId, rec.topicTitle, 'reader');
-                              }
-                            }}
-                            className="group flex items-center justify-between gap-3 p-2 rounded-2xl hover:bg-white/[0.06] transition-colors cursor-pointer"
+                            className="group relative flex items-center justify-between gap-3 p-2 rounded-2xl hover:bg-white/[0.06] transition-colors cursor-pointer"
                           >
-                            <div className="flex items-center gap-3 min-w-0">
+                            <button type="button" aria-label={`Continue reading ${rec.topicTitle}`}
+
+                              onClick={() => linked ? openWorkspace(linked, 'reader') : resolveOrOpenPaperById(rec.discoveryId, rec.topicTitle, 'reader')}
+
+                              className="absolute inset-0 z-10 rounded-2xl" />
+                            <div className="pointer-events-none flex items-center gap-3 min-w-0">
                               <div className="w-11 h-11 rounded-xl overflow-hidden shrink-0 border border-white/15">
                                 <EditorialArtwork
                                   theme={linked?.artworkTheme || 'scholarly_paper'}
@@ -1563,7 +1520,7 @@ export default function App() {
                                  if (linked) openWorkspace(linked, 'reader');
                                  else resolveOrOpenPaperById(rec.discoveryId, rec.topicTitle, 'reader');
                                }}
-                               className="w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
+                               className="relative z-20 w-7 h-7 rounded-full bg-white/10 group-hover:bg-white group-hover:text-[#0B0A0E] text-white/80 flex items-center justify-center transition-colors shrink-0"
                             >
                               <Play className="w-3 h-3 fill-current ml-0.5" />
                             </button>
@@ -1707,9 +1664,13 @@ export default function App() {
                       {discoveries.slice(0, 4).map((card) => (
                         <div
                           key={card.id}
-                          onClick={() => openWorkspace(card, 'reader')}
                           className="group relative h-64 rounded-[24px] overflow-hidden border border-white/12 cursor-pointer flex flex-col justify-between p-4 shadow-lg"
                         >
+                          <button type="button" aria-label={`Explore ${card.title}`}
+
+                            onClick={() => openWorkspace(card, 'reader')}
+
+                            className="absolute inset-0 z-10 rounded-[24px]" />
                           <EditorialArtwork
                             theme={card.artworkTheme}
                             variant="card"
@@ -1733,7 +1694,7 @@ export default function App() {
                               }}
                               title="Create study notes"
                                aria-label={`Create study notes for ${card.title}`}
-                               className="w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
+                               className="relative z-20 w-7 h-7 rounded-full orbit-glass-pill flex items-center justify-center text-white/80 hover:text-white"
                             >
                               <MoreHorizontal className="w-3.5 h-3.5" />
                             </button>
@@ -1741,7 +1702,7 @@ export default function App() {
 
                           {/* Card Bottom Lockup */}
                           <div className="relative z-10 flex items-end justify-between gap-2.5 mt-auto">
-                            <div className="min-w-0">
+                            <div className="pointer-events-none min-w-0">
                               <span className="text-[11px] text-white/70 block truncate">
                                 {card.domain}
                               </span>
@@ -1756,7 +1717,7 @@ export default function App() {
                             <button
                               aria-label={`Read ${card.title}`}
                                onClick={(e) => { e.stopPropagation(); openWorkspace(card, 'reader'); }}
-                               className="w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
+                               className="relative z-20 w-10 h-10 rounded-full bg-white text-[#0B0A0E] flex items-center justify-center shadow-md group-hover:scale-105 transition-transform shrink-0"
                             >
                               <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
                             </button>
@@ -1819,6 +1780,17 @@ export default function App() {
                       />
                     </button>
                   </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2" aria-label="Suggested discoveries">
+                  <span className="text-xs text-white/65">New here? Start with:</span>
+                  {SEED_DISCOVERIES.slice(0, 3).map((sample) => (
+                    <button type="button" key={sample.id}
+                      onClick={() => openWorkspace(sample, 'reader')}
+                      className="orbit-glass-pill rounded-full px-3 py-1.5 text-xs text-white/85 hover:text-white hover:bg-white/20 transition-colors">
+                      {sample.title}
+                    </button>
+                  ))}
                 </div>
 
                 {/* Primary Research Search Box */}
@@ -2640,6 +2612,13 @@ export default function App() {
             onBackToDiscover={() => setActiveSection('discover')}
             initialInspectRepo={initialInspectRepo}
           />
+        )}
+
+        {(activeSection === 'library' || activeSection === 'notes') && (
+          <p className="orbit-glass-subtle rounded-2xl px-4 py-3 text-xs text-white/75 leading-relaxed">
+            Your notes, bookmarks, and learning progress are saved in this browser only.
+            They do not sync between devices and may be lost if you clear browser data.
+          </p>
         )}
 
         {/* DESTINATION 2: MY LIBRARY (Saved Papers, Reading Progress, D3 Concept Map, Followed Topics & Open-Source Tools) */}

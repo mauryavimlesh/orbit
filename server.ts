@@ -218,145 +218,22 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
-  // 1. Library Hydration & Quota Status Endpoint
-  app.post('/api/library/hydrate', (req, res) => {
-    const clientNotes = Array.isArray(req.body?.notes) ? req.body.notes : [];
-    const clientDiscoveries = Array.isArray(req.body?.liveDiscoveries)
-      ? req.body.liveDiscoveries
-      : [];
-    const clientBookmarks = Array.isArray(req.body?.bookmarkedIds)
-      ? req.body.bookmarkedIds
-      : null;
-
-    const storedNotes: any[] = [];
-    const storedDiscoveries: any[] = [];
-    let storedBookmarks: string[] | null = null;
-
-    if (db) {
-      try {
-        // Upsert client-approved notes into SQLite
-        const upsertNote = db.prepare(`
-          INSERT INTO notes (id, discovery_id, title, status, note_json, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            status = excluded.status,
-            note_json = excluded.note_json,
-            updated_at = excluded.updated_at
-        `);
-        for (const n of clientNotes) {
-          if (n && n.id && n.status === 'approved_saved') {
-            upsertNote.run(
-              String(n.id),
-              String(n.discoveryId || ''),
-              String(n.discoveryTitle || ''),
-              String(n.status),
-              JSON.stringify(n),
-              String(n.updatedAt || new Date().toISOString())
-            );
-          }
-        }
-        const rows = db
-          .prepare("SELECT note_json FROM notes WHERE status = 'approved_saved' ORDER BY updated_at DESC")
-          .all() as Array<{ note_json: string }>;
-        for (const r of rows) {
-          storedNotes.push(JSON.parse(r.note_json));
-        }
-
-        // Upsert live-fetched discoveries so saved/noted papers survive refresh
-        const upsertDisc = db.prepare(`
-          INSERT INTO saved_discoveries (id, discovery_json, updated_at)
-          VALUES (?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            discovery_json = excluded.discovery_json,
-            updated_at = excluded.updated_at
-        `);
-        for (const d of clientDiscoveries) {
-          if (d && d.id) {
-            upsertDisc.run(
-              String(d.id),
-              JSON.stringify(d),
-              new Date().toISOString()
-            );
-          }
-        }
-        const discRows = db
-          .prepare('SELECT discovery_json FROM saved_discoveries ORDER BY updated_at DESC LIMIT 50')
-          .all() as Array<{ discovery_json: string }>;
-        for (const r of discRows) {
-          storedDiscoveries.push(JSON.parse(r.discovery_json));
-        }
-
-        // Sync bookmarks if provided
-        if (clientBookmarks) {
-          db.prepare(`
-            INSERT INTO user_state (state_key, state_json, updated_at)
-            VALUES ('bookmarks', ?, ?)
-            ON CONFLICT(state_key) DO UPDATE SET
-              state_json = excluded.state_json,
-              updated_at = excluded.updated_at
-          `).run(JSON.stringify(clientBookmarks), new Date().toISOString());
-        }
-        const bmRow = db
-          .prepare("SELECT state_json FROM user_state WHERE state_key = 'bookmarks'")
-          .get() as { state_json: string } | undefined;
-        if (bmRow) {
-          storedBookmarks = JSON.parse(bmRow.state_json);
-        }
-      } catch (e) {
-        console.warn('SQLite hydrate warning:', e);
-      }
-    }
-
-    res.json({
-      notes: storedNotes.length > 0 ? storedNotes : clientNotes,
-      liveDiscoveries: storedDiscoveries.length > 0 ? storedDiscoveries : clientDiscoveries,
-      bookmarkedIds: storedBookmarks || clientBookmarks || [],
-      quotaStatus: getQuotaState(),
-    });
+  // No authenticated accounts exist yet; never expose a shared global guest library.
+  // Browser-local notes and bookmarks remain private to the current device.
+  // Old database rows are left intact until a reviewed migration/retention plan exists.
+  app.post('/api/library/hydrate', (_req, res) => {
+    res.json({ notes: [], liveDiscoveries: [], bookmarkedIds: [],
+      quotaStatus: getQuotaState(), persistence: 'browser-local' });
   });
 
-  app.get('/api/quota/status', (_req, res) => {
-    res.json(getQuotaState());
+  app.get('/api/quota/status', (_req, res) => res.json(getQuotaState()));
+
+  app.post('/api/notes/approve', (_req, res) => {
+    res.status(409).json({ error: 'Guest notes are saved on this device only.' });
   });
 
-  app.post('/api/notes/approve', (req, res) => {
-    const note = req.body?.note;
-    if (!note || !note.id) {
-      res.status(400).json({ error: 'Valid note required' });
-      return;
-    }
-    if (db) {
-      try {
-        db.prepare(`
-          INSERT INTO notes (id, discovery_id, title, status, note_json, updated_at)
-          VALUES (?, ?, ?, 'approved_saved', ?, ?)
-          ON CONFLICT(id) DO UPDATE SET
-            status = 'approved_saved',
-            note_json = excluded.note_json,
-            updated_at = excluded.updated_at
-        `).run(
-          String(note.id),
-          String(note.discoveryId || ''),
-          String(note.discoveryTitle || ''),
-          JSON.stringify(note),
-          new Date().toISOString()
-        );
-      } catch {
-        // ignore
-      }
-    }
-    res.json({ ok: true });
-  });
-
-  app.delete('/api/notes/:id', (req, res) => {
-    if (db) {
-      try {
-        db.prepare('DELETE FROM notes WHERE id = ?').run(String(req.params.id));
-      } catch {
-        // ignore
-      }
-    }
-    res.json({ ok: true });
+  app.delete('/api/notes/:id', (_req, res) => {
+    res.status(409).json({ error: 'Guest notes are managed on this device only.' });
   });
 
   const inferResearchDomain = (rawText: string, explicitDomain?: string): string => {
