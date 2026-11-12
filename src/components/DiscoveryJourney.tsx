@@ -3,6 +3,7 @@ import type { DiscoveryItem } from '../types/orbit';
 
 import { chooseNextLearningStep, recommendDiscoveries, summarizeJourney } from '../lib/journey';
 import type { JourneyActivity } from '../lib/journey';
+export type { JourneyActivity } from '../lib/journey';
 import { ArrowRight, BookOpen, Check, Compass, GraduationCap } from 'lucide-react';
 
 const INTERESTS_KEY = 'orbit_v1_journey_interests';
