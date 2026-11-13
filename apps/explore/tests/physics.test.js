@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {MU, initialState, step, invariants, classify, trajectory, ESCAPE_MULTIPLIER} from '../src/physics.js';
+test('circular solution conserves radius and energy',()=>{let s=initialState(); const e=invariants(s).energy;for(let i=0;i<1000;i++)s=step(s,0.001);assert.ok(Math.abs(invariants(s).r-1)<0.0002);assert.ok(Math.abs(invariants(s).energy-e)<0.0001);});
+test('elliptical for sub-circular noncollision initial speed',()=>assert.equal(classify(initialState(0.85)),'elliptical'));
+test('unbound above escape speed',()=>assert.equal(classify(initialState(ESCAPE_MULTIPLIER+0.01)),'unbound'));
+test('classification changes with gravity',()=>assert.equal(classify(initialState(1,0.5)),'parabolic'));
+test('deterministic trajectories',()=>assert.deepEqual(trajectory(0.9,1,{steps:25}),trajectory(0.9,1,{steps:25})));
+test('invalid inputs rejected',()=>{assert.throws(()=>initialState(1,0));assert.throws(()=>step(initialState(),0));assert.throws(()=>step(initialState(),0.5));});
+test('circular speed formula under mu',()=>assert.ok(Math.abs(Math.sqrt(MU)-2*Math.PI)<1e-10));
